@@ -120,10 +120,12 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar backgroundColor="#F3F4F6" barStyle="dark-content" />
-      {renderScreen()}
-    </SafeAreaView>
+    <View style={styles.root}>
+      <SafeAreaView style={styles.container}>
+        <StatusBar backgroundColor="#F3F4F6" barStyle="dark-content" />
+        {renderScreen()}
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -256,12 +258,29 @@ const EditorScreen = ({ initialNote, onSave, onCancel }: any) => {
 // --- Styles ---
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: '#E5E7EB', // Gray background for the web page
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB',
-    // In a real Expo app, we would use I18nManager.forceRTL(true)
-    // For this web preview, we ensure RTL flow using flexDirection
-    direction: 'rtl',
+    width: '100%',
+    // Restrict size on web to simulate a mobile device
+    ...(Platform.OS === 'web' && {
+      maxWidth: 400,
+      maxHeight: 800,
+      borderRadius: 24,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.1,
+      shadowRadius: 20,
+      elevation: 10,
+      marginVertical: 20,
+    }),
   },
   screenContainer: {
     flex: 1,
