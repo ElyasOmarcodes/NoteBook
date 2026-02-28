@@ -24,7 +24,6 @@ jobs:
           java-version: '21'
           distribution: 'zulu'
 
-      # دلته مو ستونزه حل کړه (د --legacy-peer-deps په زیاتولو سره)
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
@@ -41,6 +40,21 @@ jobs:
             "android.permission.VIBRATE"
           ]' app.json > temp.json && mv temp.json app.json
           echo "✅ Permissions injected!"
+
+      # دا نوی سټیپ دی چې د آیکون او فولډر ستونزه حل کوي!
+      - name: Fix Assets and Icons Error
+        run: |
+          mkdir -p assets
+          # که ستاسو په پروژه کې icon.png وي، هغه د لوګو په توګه کاروي
+          if [ -f "icon.png" ]; then
+            cp icon.png assets/icon.png
+            cp icon.png assets/adaptive-icon.png
+            cp icon.png assets/splash.png
+          else
+            # که انځور نه وي، نو له app.json څخه د انځور اړتیا پاکوي ترڅو ارور ورنکړي
+            jq 'del(.expo.icon, .expo.splash, .expo.android.adaptiveIcon)' app.json > temp.json && mv temp.json app.json
+          fi
+          echo "✅ Assets and Icons fixed successfully!"
 
       - name: Generate Native Android Code
         run: npx expo prebuild --platform android --clean
