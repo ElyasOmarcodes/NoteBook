@@ -41,20 +41,25 @@ jobs:
           ]' app.json > temp.json && mv temp.json app.json
           echo "✅ Permissions injected!"
 
-      # دا نوی سټیپ دی چې د آیکون او فولډر ستونزه حل کوي!
-      - name: Fix Assets and Icons Error
+      # دا هغه برخه ده چې بدله شوې او د سپلېش سکرین د رنګ ارور سل په سلو کې حلوي
+      - name: Fix Assets and Splash Screen Error
         run: |
           mkdir -p assets
-          # که ستاسو په پروژه کې icon.png وي، هغه د لوګو په توګه کاروي
-          if [ -f "icon.png" ]; then
-            cp icon.png assets/icon.png
-            cp icon.png assets/adaptive-icon.png
-            cp icon.png assets/splash.png
-          else
-            # که انځور نه وي، نو له app.json څخه د انځور اړتیا پاکوي ترڅو ارور ورنکړي
-            jq 'del(.expo.icon, .expo.splash, .expo.android.adaptiveIcon)' app.json > temp.json && mv temp.json app.json
+          
+          # که تاسو icon.png نه وي اپلوډ کړی، دا به پخپله یو خالي کوچنی انځور جوړ کړي
+          if [ ! -f "icon.png" ]; then
+            echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" | base64 --decode > icon.png
           fi
-          echo "✅ Assets and Icons fixed successfully!"
+          
+          # انځورونه د assets فولډر ته کاپي کوي
+          cp icon.png assets/icon.png
+          cp icon.png assets/adaptive-icon.png
+          cp icon.png assets/splash.png
+          
+          # په app.json کې د انځورونو لارې او د شالید رنګ (سپین) ور اضافه کوي ترڅو انډرایډ ارور ورنکړي
+          jq '.expo.icon = "./assets/icon.png" | .expo.splash = {"image": "./assets/splash.png", "resizeMode": "contain", "backgroundColor": "#ffffff"} | .expo.android.adaptiveIcon = {"foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#ffffff"}' app.json > temp.json && mv temp.json app.json
+          
+          echo "✅ Assets and Splash Screen fixed successfully!"
 
       - name: Generate Native Android Code
         run: npx expo prebuild --platform android --clean
