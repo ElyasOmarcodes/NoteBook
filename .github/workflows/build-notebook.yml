@@ -24,16 +24,15 @@ jobs:
           java-version: '21'
           distribution: 'zulu'
 
+      # دلته مو ستونزه حل کړه (د --legacy-peer-deps په زیاتولو سره)
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
-      # ۱. د آزمایښتي اپلیکیشن نوم او پکیج تنظیمول
       - name: Set App Name and Package ID
         run: |
           jq '.expo.name = "یادښتونه" | .expo.slug = "my-notebook" | .expo.android.package = "com.elyas.notebook"' app.json > temp.json && mv temp.json app.json
           echo "✅ Notebook App Name and Package ID set successfully!"
 
-      # ۲. د اړینو اجازو (Permissions) ورزیاتول (لکه سټوریج چې د نوټونو خوندي کولو لپاره پکار دی)
       - name: Inject Android Permissions
         run: |
           jq '.expo.android.permissions = [
@@ -43,18 +42,15 @@ jobs:
           ]' app.json > temp.json && mv temp.json app.json
           echo "✅ Permissions injected!"
 
-      # ۳. د Expo Prebuild کمانډ رن کول
       - name: Generate Native Android Code
         run: npx expo prebuild --platform android --clean
 
-      # ۴. د APK جوړول
       - name: Build Android APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      # ۵. د جوړ شوي APK اپلوډ کول (ترڅو یې ډاونلوډ کړئ)
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
