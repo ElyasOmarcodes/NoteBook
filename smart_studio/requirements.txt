@@ -1,0 +1,9 @@
+# Smart Studio - Python dependencies
+# د سمارټ سټوډیو لپاره اړین کتابتونونه
+
+Flask==3.0.3
+Flask-SocketIO==5.3.6
+python-socketio==5.11.4
+numpy==1.26.4
+sounddevice==0.4.7
+soundfile==0.12.1
