@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ps" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>سمارټ سټوډیو — د غږ هوښیار مدیریت</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+    <div class="brand">
+        <span class="logo">🎚️</span>
+        <div>
+            <h1>سمارټ سټوډیو</h1>
+            <p class="subtitle">د غږ هوښیار مدیریت او اتومات سیسټم</p>
+        </div>
+    </div>
+    <div class="status-badge" id="connBadge">د نښلولو په حال کې…</div>
+</header>
+
+{% if not audio_available %}
+<div class="warning-bar">
+    ⚠️ خبرتیا: د غږ کتابتونونه پدې چاپیریال کې شتون نلري — برنامه په <b>ډیمو حالت</b> کې ده.
+    د بشپړ فعالیت لپاره دا برنامه په خپل (Windows) کمپیوټر کې پیل کړئ.
+</div>
+{% endif %}
+
+<main class="grid">
+
+    <!-- ============ PANEL A: د وسایلو لارښوونه ============ -->
+    <section class="panel">
+        <h2>🔌 د وسایلو لارښوونه</h2>
+
+        <label>د ننوتلو سرچینه (میکروفون)</label>
+        <select id="inputDevice"></select>
+
+        <label>د وتلو سرچینه (سپیکر / بلوتوث)</label>
+        <select id="outputDevice"></select>
+
+        <button class="btn btn-secondary" id="refreshBtn">
+            🔄 وسایل تازه کړئ
+        </button>
+    </section>
+
+    <!-- ============ PANEL B: مدغم میوزیک پلیر ============ -->
+    <section class="panel">
+        <h2>🎵 مدغم میوزیک پلیر</h2>
+
+        <input type="file" id="fileInput" accept=".mp3,.wav,.flac,.ogg,.m4a,.aac" hidden>
+        <button class="btn btn-secondary" id="uploadBtn">
+            📂 د میوزیک فایل وټاکئ
+        </button>
+        <div class="track-name" id="trackName">هیڅ فایل نه دی ټاکل شوی</div>
+
+        <div class="player-controls">
+            <button class="btn btn-play" id="playBtn">▶ غږول</button>
+            <button class="btn btn-secondary" id="pauseBtn">⏸ ودرول</button>
+            <button class="btn btn-secondary" id="stopBtn">⏹ بندول</button>
+        </div>
+
+        <label>د پلیر اصلي حجم (لاسي حالت)
+            <span class="val" id="masterVolVal">80%</span>
+        </label>
+        <input type="range" id="masterVol" min="0" max="100" value="80">
+    </section>
+
+    <!-- ============ PANEL C: د اتوماتیک تنظیمات ============ -->
+    <section class="panel panel-wide">
+        <h2>⚙️ د اتومات تنظیمات او وخت کنټرول</h2>
+
+        <div class="mode-row">
+            <span>د کنټرول حالت:</span>
+            <div class="toggle">
+                <button class="mode-btn active" id="autoModeBtn" data-mode="auto">اتومات</button>
+                <button class="mode-btn" id="manualModeBtn" data-mode="manual">لاسي</button>
+            </div>
+        </div>
+
+        <div class="sliders">
+            <div class="slider-item">
+                <label>د میکروفون حساسیت (Threshold)
+                    <span class="val" id="thresholdVal">0.05</span>
+                </label>
+                <input type="range" id="threshold" min="0" max="100" value="5">
+            </div>
+
+            <div class="slider-item">
+                <label>لږترلږه حجم (د خبرو پر مهال)
+                    <span class="val" id="minVolVal">10%</span>
+                </label>
+                <input type="range" id="minVol" min="0" max="100" value="10">
+            </div>
+
+            <div class="slider-item">
+                <label>اعظمي حجم (د چوپتیا پر مهال)
+                    <span class="val" id="maxVolVal">80%</span>
+                </label>
+                <input type="range" id="maxVol" min="0" max="100" value="80">
+            </div>
+
+            <div class="slider-item">
+                <label>د ښکته کیدو سرعت (Fade-Down)
+                    <span class="val" id="fadeDownVal">300ms</span>
+                </label>
+                <input type="range" id="fadeDown" min="50" max="3000" step="50" value="300">
+            </div>
+
+            <div class="slider-item">
+                <label>د پورته کیدو سرعت (Fade-Up)
+                    <span class="val" id="fadeUpVal">800ms</span>
+                </label>
+                <input type="range" id="fadeUp" min="50" max="5000" step="50" value="800">
+            </div>
+
+            <div class="slider-item">
+                <label>د چوپتیا ځنډ (Hold Time)
+                    <span class="val" id="holdTimeVal">1.5s</span>
+                </label>
+                <input type="range" id="holdTime" min="0" max="5000" step="100" value="1500">
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ PANEL D: ژوندۍ څارنه ============ -->
+    <section class="panel panel-wide">
+        <h2>📊 ژوندۍ څارنه (Live Monitoring)</h2>
+
+        <label>د میکروفون سطحه (VU Meter)</label>
+        <div class="vu-wrap">
+            <div class="vu-bar" id="vuBar"></div>
+            <div class="vu-threshold" id="vuThreshold"></div>
+        </div>
+
+        <div class="monitor-row">
+            <div class="monitor-box">
+                <span class="mon-label">حالت</span>
+                <span class="mon-value" id="duckState">چوپ</span>
+            </div>
+            <div class="monitor-box">
+                <span class="mon-label">د میوزیک حجم</span>
+                <span class="mon-value" id="gainValue">80%</span>
+            </div>
+            <div class="monitor-box">
+                <span class="mon-label">د پلیر حالت</span>
+                <span class="mon-value" id="playState">ودرول شوی</span>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<footer class="foot">
+    سمارټ سټوډیو · د Python + Flask + SocketIO په مرسته جوړ شوی
+</footer>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,198 @@
+/* ==========================================================
+   Smart Studio - Stylesheet (RTL / Pashto)
+   ========================================================== */
+
+:root {
+    --bg: #0f1419;
+    --bg-panel: #1a212b;
+    --bg-panel-2: #232c38;
+    --accent: #4ade80;
+    --accent-2: #22d3ee;
+    --danger: #f87171;
+    --warn: #fbbf24;
+    --text: #e5e9f0;
+    --text-dim: #94a3b8;
+    --border: #2d3848;
+    --radius: 14px;
+    --shadow: 0 8px 24px rgba(0, 0, 0, .35);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: "Segoe UI", Tahoma, "Noto Naskh Arabic", sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #1b2430, var(--bg));
+    color: var(--text);
+    min-height: 100vh;
+    padding-bottom: 40px;
+}
+
+/* ---------- Topbar ---------- */
+.topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 28px;
+    background: rgba(20, 26, 34, .8);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 10;
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.logo { font-size: 34px; }
+.topbar h1 { font-size: 22px; }
+.subtitle { color: var(--text-dim); font-size: 13px; }
+
+.status-badge {
+    padding: 7px 14px; border-radius: 999px;
+    background: var(--bg-panel-2); color: var(--text-dim);
+    font-size: 13px; border: 1px solid var(--border);
+}
+.status-badge.connected { color: var(--accent); border-color: var(--accent); }
+.status-badge.disconnected { color: var(--danger); border-color: var(--danger); }
+
+/* ---------- Warning bar ---------- */
+.warning-bar {
+    margin: 16px 28px 0;
+    background: rgba(251, 191, 36, .12);
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    padding: 12px 18px; border-radius: var(--radius);
+    font-size: 14px; line-height: 1.7;
+}
+
+/* ---------- Grid ---------- */
+.grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    padding: 24px 28px;
+    max-width: 1100px; margin: 0 auto;
+}
+.panel-wide { grid-column: 1 / -1; }
+
+@media (max-width: 760px) {
+    .grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- Panel ---------- */
+.panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+}
+.panel h2 { font-size: 16px; margin-bottom: 16px; color: var(--accent-2); }
+
+label {
+    display: block;
+    font-size: 13px; color: var(--text-dim);
+    margin: 14px 0 6px;
+}
+label .val { color: var(--accent); float: left; font-weight: 600; }
+
+select, input[type="file"] {
+    width: 100%; padding: 10px 12px;
+    background: var(--bg-panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    font-family: inherit; font-size: 14px;
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px;
+    padding: 11px 16px; margin-top: 12px;
+    border: none; border-radius: 10px;
+    font-family: inherit; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: transform .08s, filter .15s;
+    width: 100%;
+}
+.btn:active { transform: scale(.97); }
+.btn-secondary { background: var(--bg-panel-2); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { filter: brightness(1.25); }
+.btn-play { background: var(--accent); color: #06281a; }
+.btn-play:hover { filter: brightness(1.1); }
+
+.player-controls {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    margin-top: 14px;
+}
+.player-controls .btn { margin-top: 0; }
+
+.track-name {
+    margin-top: 10px; padding: 8px 12px;
+    background: var(--bg-panel-2); border-radius: 8px;
+    font-size: 13px; color: var(--text-dim);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ---------- Range sliders ---------- */
+input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 6px; border-radius: 3px;
+    background: var(--bg-panel-2);
+    outline: none; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); border: 2px solid #0a3a25;
+}
+input[type="range"]::-moz-range-thumb {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); border: 2px solid #0a3a25;
+}
+
+/* ---------- Mode toggle ---------- */
+.mode-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 18px;
+}
+.toggle { display: flex; background: var(--bg-panel-2); border-radius: 10px; padding: 4px; }
+.mode-btn {
+    padding: 8px 22px; border: none; background: transparent;
+    color: var(--text-dim); font-family: inherit; font-size: 14px;
+    font-weight: 600; border-radius: 8px; cursor: pointer;
+}
+.mode-btn.active { background: var(--accent); color: #06281a; }
+
+.sliders {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 24px;
+}
+@media (max-width: 600px) { .sliders { grid-template-columns: 1fr; } }
+
+/* ---------- VU Meter ---------- */
+.vu-wrap {
+    position: relative;
+    height: 28px; border-radius: 8px;
+    background: var(--bg-panel-2);
+    overflow: hidden; margin-top: 6px;
+    border: 1px solid var(--border);
+}
+.vu-bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--warn) 70%, var(--danger));
+    transition: width .06s linear;
+}
+.vu-threshold {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: #fff; opacity: .8; left: 5%;
+}
+
+.monitor-row {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    margin-top: 18px;
+}
+.monitor-box {
+    background: var(--bg-panel-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; text-align: center;
+}
+.mon-label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+.mon-value { font-size: 18px; font-weight: 700; color: var(--accent-2); }
+.mon-value.ducking { color: var(--warn); }
+
+/* ---------- Footer ---------- */
+.foot {
+    text-align: center; color: var(--text-dim);
+    font-size: 12px; margin-top: 20px;
+}
