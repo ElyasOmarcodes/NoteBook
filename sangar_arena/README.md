@@ -82,6 +82,12 @@ after an agent id and `loadExternalRig()` will use it instead.
 
 ## جوړول / Building
 
+The Android build runs on **Flutter 3.44.9** with **AGP 9**, which is why
+`flutter_inappwebview` is pinned to `6.2.0-beta.3`: it is the first release
+whose Android module stopped using `getDefaultProguardFile('proguard-android.txt')`,
+a call AGP 9 rejects outright. Move back to a `6.1.x` stable release only
+together with an AGP 8 toolchain.
+
 ```bash
 cd sangar_arena
 flutter pub get
