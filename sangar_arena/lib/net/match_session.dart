@@ -416,13 +416,14 @@ class MatchSession extends ChangeNotifier {
       killerTeam: shooter.team,
       victimTeam: victim.team,
     );
-    _pushKill(event);
-    _broadcast({
+    final payload = {
       't': Proto.kill,
       ...event.toJson(),
       'killerId': shooter.id,
       'victimId': victim.id,
-    });
+    };
+    _pushKill(event, payload);
+    _broadcast(payload);
     _broadcastStats();
 
     Timer(Duration(seconds: _config.respawnSeconds), () {
@@ -592,8 +593,7 @@ class MatchSession extends ChangeNotifier {
         }
         _events.add(SessionEvent(Proto.snapshot, msg));
       case Proto.kill:
-        _pushKill(KillEvent.fromJson(msg));
-        _events.add(SessionEvent(Proto.kill, msg));
+        _pushKill(KillEvent.fromJson(msg), msg);
         notifyListeners();
       case Proto.damage:
       case Proto.respawn:
@@ -826,11 +826,16 @@ class MatchSession extends ChangeNotifier {
         'hp': (_health[id] ?? 100).clamp(0, 100),
       });
     });
-    _broadcast({
+    final msg = {
       't': Proto.snapshot,
       'ts': DateTime.now().millisecondsSinceEpoch,
       'p': list,
-    });
+    };
+    _broadcast(msg);
+    // The host plays on the same device it serves from, so its engine needs
+    // the same snapshot everyone else is sent — without this, every other
+    // soldier stands frozen on the host's screen.
+    _events.add(SessionEvent(Proto.snapshot, msg));
   }
 
   /// Called by the engine bridge ~20x a second with this device's transform.
@@ -922,10 +927,15 @@ class MatchSession extends ChangeNotifier {
     _hostEndMatch();
   }
 
-  void _pushKill(KillEvent event) {
+  /// Records a kill and forwards exactly one event to the engine.
+  ///
+  /// [payload] is what the engine receives; it carries the killer and victim
+  /// ids that a bare [KillEvent] does not, so the engine can tell whether the
+  /// kill was the local player's.
+  void _pushKill(KillEvent event, [Map<String, dynamic>? payload]) {
     killFeed.insert(0, event);
     if (killFeed.length > 40) killFeed.removeRange(40, killFeed.length);
-    _events.add(SessionEvent(Proto.kill, event.toJson()));
+    _events.add(SessionEvent(Proto.kill, payload ?? event.toJson()));
   }
 
   void _fail(String message) {
