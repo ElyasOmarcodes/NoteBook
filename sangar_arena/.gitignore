@@ -1,0 +1,22 @@
+# Dart / Flutter
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+
+# Generated platform folders we do not ship (Android is committed so the CI
+# build is reproducible without a `flutter create` step).
+ios/
+linux/
+macos/
+windows/
+web/
+
+# Android local state
+android/local.properties
+android/.gradle/
+android/app/*.iml
+android/*.iml

@@ -1,0 +1,162 @@
+name: Build Sangar Arena APK
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'sangar_arena/**'
+      - '.github/workflows/build-sangar-arena.yml'
+  pull_request:
+    paths:
+      - 'sangar_arena/**'
+      - '.github/workflows/build-sangar-arena.yml'
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: 'APK build mode'
+        type: choice
+        options: [release, debug]
+        default: release
+      split_abi:
+        description: 'Also produce per-ABI APKs (smaller downloads)'
+        type: boolean
+        default: true
+
+env:
+  # Pinned so a Flutter release cannot silently change the build. The Dart in
+  # this project is analysed clean against exactly this version.
+  FLUTTER_VERSION: '3.44.9'
+  PROJECT_DIR: sangar_arena
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Flutter SDK
+        id: flutter-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/flutter
+          key: flutter-${{ env.FLUTTER_VERSION }}-linux
+
+      - name: Install Flutter ${{ env.FLUTTER_VERSION }}
+        if: steps.flutter-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          url="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
+          curl -fsSL --retry 3 --retry-delay 5 -o /tmp/flutter.tar.xz "$url"
+          tar xf /tmp/flutter.tar.xz -C "$HOME"
+
+      - name: Put Flutter on PATH
+        run: |
+          echo "$HOME/flutter/bin" >> "$GITHUB_PATH"
+          git config --global --add safe.directory "$HOME/flutter"
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ env.FLUTTER_VERSION }}-${{ hashFiles('sangar_arena/pubspec.yaml') }}
+          restore-keys: pub-${{ env.FLUTTER_VERSION }}-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('sangar_arena/android/**/*.gradle*', 'sangar_arena/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      # The three.js engine is plain ES modules loaded by the WebView, so it is
+      # never type-checked by the Dart toolchain. A syntax pass here catches a
+      # broken engine file before it ships inside an APK that still builds.
+      - name: Check game engine syntax
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in $(find "$PROJECT_DIR/assets/web/js" -name '*.js'); do
+            cp "$f" /tmp/check.mjs
+            if ! node --check /tmp/check.mjs; then
+              echo "::error file=$f::JavaScript syntax error"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: Resolve dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter analyze
+
+      # These cover the LAN layer end to end over loopback sockets — join,
+      # team balancing, hit resolution, the kill feed and match end — so a
+      # protocol regression fails here rather than on someone's hotspot.
+      - name: Test
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter test --reporter expanded
+
+      - name: Accept Android licences
+        run: yes | flutter doctor --android-licenses > /dev/null 2>&1 || true
+
+      - name: Build universal APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          mode="${{ inputs.build_mode || 'release' }}"
+          flutter build apk --"$mode"
+          mkdir -p ../artifacts
+          cp build/app/outputs/flutter-apk/app-"$mode".apk \
+             ../artifacts/SangarArena-universal-"$mode".apk
+
+      - name: Build per-ABI APKs
+        if: ${{ inputs.split_abi != false }}
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          mode="${{ inputs.build_mode || 'release' }}"
+          flutter build apk --"$mode" --split-per-abi
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            src="build/app/outputs/flutter-apk/app-$abi-$mode.apk"
+            [ -f "$src" ] && cp "$src" "../artifacts/SangarArena-$abi-$mode.apk"
+          done
+          ls -la ../artifacts
+
+      - name: Report APK sizes
+        run: |
+          {
+            echo "### Sangar Arena APKs"
+            echo ""
+            echo "| APK | Size |"
+            echo "| --- | ---- |"
+            for f in artifacts/*.apk; do
+              echo "| \`$(basename "$f")\` | $(du -h "$f" | cut -f1) |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: SangarArena-APK
+          path: artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 30
