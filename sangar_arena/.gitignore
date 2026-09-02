@@ -7,16 +7,18 @@ build/
 *.iml
 .idea/
 
-# Generated platform folders we do not ship (Android is committed so the CI
-# build is reproducible without a `flutter create` step).
-ios/
-linux/
-macos/
-windows/
-web/
+# Generated platform folders we do not ship. These are anchored with a leading
+# slash: an unanchored `web/` would also match `assets/web/`, which is the game
+# engine itself.
+/ios/
+/linux/
+/macos/
+/windows/
+/web/
 
-# Android local state
-android/local.properties
-android/.gradle/
-android/app/*.iml
-android/*.iml
+# Android local state (the rest of android/ is committed so CI can build
+# without a `flutter create` step).
+/android/local.properties
+/android/.gradle/
+/android/app/*.iml
+/android/*.iml

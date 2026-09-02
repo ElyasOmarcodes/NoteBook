@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ps" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Sangar Arena</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <!-- Loading veil, hidden as soon as the world is built -->
+  <div id="boot">
+    <div class="boot-mark">سنګر ډګر</div>
+    <div class="boot-sub">SANGAR ARENA</div>
+    <div class="boot-bar"><span id="boot-fill"></span></div>
+    <div class="boot-note" id="boot-note">Building the battlefield…</div>
+  </div>
+
+  <!-- Heads-up display -->
+  <div id="hud" class="hidden">
+    <!-- top strip -->
+    <div class="hud-top">
+      <div class="chip" id="chip-self">
+        <span class="chip-name" id="self-name">Player</span>
+        <span class="chip-stat"><b id="stat-kills">0</b> <i data-i18n="kills">Kills</i></span>
+        <span class="chip-stat"><b id="stat-deaths">0</b> <i data-i18n="deaths">Deaths</i></span>
+      </div>
+      <div class="chip chip-center" id="chip-score">
+        <span class="team-a" id="score-a">0</span>
+        <span class="score-sep">:</span>
+        <span class="team-b" id="score-b">0</span>
+      </div>
+      <div class="chip chip-right">
+        <span class="chip-label" data-i18n="matchEnds">Match ends</span>
+        <span class="chip-clock" id="match-clock">10:00</span>
+      </div>
+    </div>
+
+    <!-- kill toasts -->
+    <div id="toasts"></div>
+
+    <!-- crosshair + hit marker -->
+    <div id="crosshair"><span class="ch-t"></span><span class="ch-b"></span><span class="ch-l"></span><span class="ch-r"></span><span class="ch-dot"></span></div>
+    <div id="hitmarker"></div>
+    <div id="damage-vignette"></div>
+    <div id="flash-veil"></div>
+
+    <!-- scope overlay for optics -->
+    <div id="scope" class="hidden">
+      <div class="scope-ring"></div>
+      <div class="scope-cross"></div>
+      <div class="scope-mil"></div>
+    </div>
+
+    <!-- bottom-left: health + ammo -->
+    <div class="hud-bottom-left">
+      <div class="pips" id="health-pips"></div>
+      <div class="ammo-line">
+        <span id="ammo-mag">30</span><span class="ammo-sep">/</span><span id="ammo-reserve">270</span>
+      </div>
+      <div class="weapon-name" id="weapon-name">Sangar AK</div>
+    </div>
+
+    <!-- left thumb: move stick -->
+    <div class="stick" id="stick-move"><span class="stick-knob"></span></div>
+
+    <!-- right thumb: look pad + action buttons -->
+    <div class="stick stick-look" id="stick-look"><span class="stick-knob"></span></div>
+
+    <div class="action-cluster" id="actions">
+      <button class="btn btn-fire" id="btn-fire" aria-label="fire"><span class="ico-fire"></span></button>
+      <button class="btn" id="btn-reload" title="reload"><span class="ico-reload"></span></button>
+      <button class="btn" id="btn-swap" title="swap weapon"><span class="ico-swap"></span></button>
+      <button class="btn" id="btn-scope" title="scope"><span class="ico-scope"></span></button>
+      <button class="btn" id="btn-nade" title="grenade"><span class="ico-nade"></span><b id="nade-count">2</b></button>
+      <button class="btn" id="btn-jump" title="jump"><span class="ico-jump"></span></button>
+      <button class="btn" id="btn-crouch" title="crouch"><span class="ico-crouch"></span></button>
+      <button class="btn" id="btn-prone" title="prone"><span class="ico-prone"></span></button>
+      <button class="btn" id="btn-melee" title="melee"><span class="ico-melee"></span></button>
+    </div>
+
+    <!-- context prompt: ladder / ammo box -->
+    <div id="prompt" class="hidden"><span id="prompt-text"></span></div>
+
+    <!-- minimap -->
+    <div id="minimap"><canvas id="minimap-canvas" width="220" height="220"></canvas></div>
+
+    <!-- respawn veil -->
+    <div id="respawn" class="hidden">
+      <div class="respawn-title" id="respawn-title">You were killed</div>
+      <div class="respawn-count" id="respawn-count">5</div>
+    </div>
+
+    <div id="fps" class="hidden">60</div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
