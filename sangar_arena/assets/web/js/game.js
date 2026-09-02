@@ -458,6 +458,10 @@ export class Game {
   }
 
   _beginRespawn(killerName) {
+    // Two deaths can be reported for the same life — a fall and an incoming
+    // damage message in the same frame, say — and two live countdowns would
+    // respawn the player twice, the second time out from under them.
+    if (this._respawnTimer) clearInterval(this._respawnTimer);
     const delay = this.config.respawnSeconds ?? 5;
     this.player.respawnIn = delay;
     this.hud.showRespawn(
@@ -466,6 +470,7 @@ export class Game {
       this.player.respawnIn -= 0.25;
       if (this.player.respawnIn <= 0) {
         clearInterval(tick);
+        this._respawnTimer = null;
         this.hud.hideRespawn();
         const threats = [
           ...Array.from(this.remotes.values()).map((r) => r.position),
@@ -476,6 +481,16 @@ export class Game {
         this.hud.showRespawn(killerName ?? '', this.player.respawnIn);
       }
     }, 250);
+    this._respawnTimer = tick;
+  }
+
+  /** Stops a pending respawn — the match ended, or the player left. */
+  _cancelRespawn() {
+    if (this._respawnTimer) {
+      clearInterval(this._respawnTimer);
+      this._respawnTimer = null;
+    }
+    this.hud.hideRespawn();
   }
 
   _blast(position, def, ownerId) {
@@ -625,6 +640,7 @@ export class Game {
         if (msg.pitch !== undefined) this.player.pitch = msg.pitch;
         break;
       case 'end':
+        this._cancelRespawn();
         this.paused = true;
         break;
       default:
@@ -729,6 +745,7 @@ export class Game {
 
   dispose() {
     this.stop();
+    this._cancelRespawn();
     for (const r of this.remotes.values()) r.dispose(this.scene);
     for (const b of this.bots) b.dispose(this.scene);
     this.player?.dispose();

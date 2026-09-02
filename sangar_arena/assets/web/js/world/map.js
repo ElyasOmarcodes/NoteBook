@@ -537,21 +537,25 @@ export class ArenaMap {
     }
   }
 
-  /** Pallet -> crate -> crate: the manual step-up route onto a roof. */
+  /**
+   * Pallet -> crate -> crate: the manual step-up route onto a roof.
+   *
+   * Each box is exactly `rise` taller than the one before, and `rise` is kept
+   * under PHYS.stepHeight — otherwise the sweep refuses to mount the next
+   * crate and the whole route is decorative. The top lands level with a
+   * shipping container, so the run continues onto the stacks.
+   */
   _crateSteps(x, z, rot) {
     const fx = Math.sin(rot), fz = Math.cos(rot);
-    const steps = [
-      { h: 0.42, s: 1.3 },
-      { h: 0.90, s: 1.2 },
-      { h: 1.40, s: 1.1 },
-      { h: 1.95, s: 1.1 },
-      { h: 2.55, s: 1.0 },
-    ];
-    steps.forEach((st, i) => {
-      this.addBox('wood', st.s, st.h, st.s,
-        x + fx * i * 1.05, st.h / 2, z + fz * i * 1.05,
+    const rise = 0.42;
+    const count = 7;
+    for (let i = 0; i < count; i++) {
+      const h = rise * (i + 1);
+      const size = 1.3 - i * 0.05;
+      this.addBox('wood', size, h, size,
+        x + fx * i * 1.05, h / 2, z + fz * i * 1.05,
         { rotY: rot + i * 0.12, density: 1.5 });
-    });
+    }
   }
 
   /** Flat-roofed block with an optional parapet you can crouch behind. */
