@@ -129,8 +129,12 @@ jobs:
           cp build/app/outputs/flutter-apk/app-"$mode".apk \
              ../artifacts/SangarArena-universal-"$mode".apk
 
+      # On a push there are no `inputs`, and GitHub coerces the empty value and
+      # `false` to the same thing — so `inputs.split_abi != false` was false on
+      # every push and these APKs were silently never built. Only an explicit
+      # opt-out on a manual run should skip them.
       - name: Build per-ABI APKs
-        if: ${{ inputs.split_abi != false }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.split_abi }}
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           mode="${{ inputs.build_mode || 'release' }}"
