@@ -1,0 +1,36 @@
+name: sangar_arena
+description: Sangar Arena — a cross-platform LAN multiplayer 3D shooter built with Flutter and three.js.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  # 6.2.0-beta is the first release whose Android module drops
+  # getDefaultProguardFile('proguard-android.txt'), which AGP 9 rejects
+  # outright. Pinned exactly so a resolver update cannot move it.
+  flutter_inappwebview: 6.2.0-beta.3
+  shared_preferences: ^2.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/web/
+    - assets/web/vendor/
+    - assets/web/js/
+    - assets/web/js/world/
+    - assets/web/js/entities/
+    - assets/web/js/systems/
+    - assets/web/models/
+    - assets/web/models/weapons/
+    - assets/web/models/characters/
+    - assets/models/
