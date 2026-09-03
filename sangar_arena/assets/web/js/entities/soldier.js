@@ -104,6 +104,23 @@ const POSE = {
     forearmR: [-1.35, 0, 0.30],
   },
 
+  /**
+   * Weapon down at the chest, the way a soldier walks around when nothing is
+   * in front of them. Blended over `carry`, so it reads as the arms relaxing
+   * rather than as a second, unrelated stance.
+   */
+  lowReady: {
+    spine: [0.05, 0, 0],
+    chest: [0.13, 0.10, 0],
+    shoulderL: [0, 0, -0.05],
+    armL: [0.24, -0.12, -0.10],
+    forearmL: [0.18, 0, 0],
+    shoulderR: [0, 0, 0.05],
+    armR: [0.24, 0.16, 0.26],
+    forearmR: [0.20, 0, 0],
+    neck: [-0.05, 0, 0],
+  },
+
   /** Aimed down sights: the weapon comes up to the eye line. */
   ads: {
     spine: [0.02, 0, 0],
@@ -186,6 +203,23 @@ const ACTIONS = {
       armL: [-0.13 * k, 0, 0],
       forearmR: [0.16 * k, 0, 0],
       neck: [-0.06 * k, 0, 0],
+    };
+  },
+
+  /** Weapon down, hands cross to the sling, new weapon comes up. */
+  [ANIM.SWAP](p) {
+    // A single down-and-up swing; the models are exchanged at the bottom.
+    const dip = Math.sin(Math.min(1, p) * Math.PI);
+    const reach = p < 0.55 ? p / 0.55 : Math.max(0, 1 - (p - 0.55) / 0.45);
+    return {
+      chest: [0.24 * dip, 0.22 * reach, 0],
+      spine: [0.10 * dip, 0, 0],
+      shoulderR: [0, 0, 0.22 * reach],
+      armR: [0.75 * dip, -0.35 * reach, -0.30 * reach],
+      forearmR: [0.55 * dip, 0, 0],
+      armL: [0.60 * dip, 0.55 * reach, 0.25 * reach],
+      forearmL: [0.70 * dip, 0, 0],
+      neck: [-0.14 * dip, 0, 0],
     };
   },
 
@@ -314,6 +348,8 @@ export class Soldier {
     this.overlayDuration = 0;
     this.aimPitch = 0;
     this.ads = 0;
+    /** 0 = weapon carried low, 1 = levelled. See `POSE.lowReady`. */
+    this.ready = 0;
     this.footstepFired = false;
     this.landPhase = 1;
     this.stepPhase = 1;
@@ -454,6 +490,12 @@ export class Soldier {
     this.aimPitch = ctx.aimPitch ?? this.aimPitch;
     const targetAds = ctx.ads ? 1 : 0;
     this.ads += (targetAds - this.ads) * Math.min(1, dt * 10);
+    // `ready` is the weapon coming up: 0 is carried at the chest with the
+    // muzzle down, 1 is levelled at whatever the soldier is looking at. It
+    // rises fast — a shot must not wait on it — and falls slowly.
+    const targetReady = ctx.ready ? 1 : 0;
+    this.ready += (targetReady - this.ready)
+      * Math.min(1, dt * (targetReady > this.ready ? 14 : 3.2));
 
     // ---- pick and time the baked clip ----
     const [clipName, baseScale] = CLIP_FOR_STATE[this.state] ?? CLIP_FOR_STATE[ANIM.IDLE];
@@ -499,6 +541,9 @@ export class Soldier {
     // guessed, so it has to wait for the first frame the additive carry pose
     // has actually been written to the bones.
     if (this.alignGrip) { this.alignGrip(); this.alignGrip = null; }
+    // Tip the weapon itself down with the arms, so the muzzle follows the
+    // hands rather than staying level while the elbows drop.
+    this.poseWeapon?.(this.ready);
   }
 
   /**
@@ -535,6 +580,8 @@ export class Soldier {
       * (this.state === ANIM.RUN ? 0.55 : 1);
     add(POSE.carry, carryWeight * (1 - this.ads));
     add(POSE.ads, carryWeight * this.ads);
+    // ...and let the arms sag toward low ready whenever the weapon is not up.
+    add(POSE.lowReady, carryWeight * (1 - this.ads) * (1 - this.ready));
 
     // Landing absorb and the step-up hop.
     if (this.state === ANIM.LAND) {

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -286,10 +288,23 @@ class _GameScreenState extends State<GameScreen> {
                 initialUrlRequest: URLRequest(
                   url: WebUri(EngineServer.instance.indexUrl),
                 ),
+                // Without this the WebView never sees a drag. Flutter's gesture
+                // arena claims every pan over a platform view unless a
+                // recognizer here says otherwise, so only taps were getting
+                // through — the stick and the look pad did nothing at all.
+                gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                  Factory<OneSequenceGestureRecognizer>(
+                      () => EagerGestureRecognizer()),
+                },
                 initialSettings: InAppWebViewSettings(
                   transparentBackground: false,
-                  disableVerticalScroll: true,
-                  disableHorizontalScroll: true,
+                  // disableVertical/HorizontalScroll must stay off: on Android
+                  // the plugin implements them by consuming ACTION_MOVE in the
+                  // view itself, so no touchmove ever reaches the page. The
+                  // page cannot scroll anyway — html, body are overflow:hidden
+                  // with touch-action:none.
+                  disableVerticalScroll: false,
+                  disableHorizontalScroll: false,
                   supportZoom: false,
                   javaScriptEnabled: true,
                   allowFileAccessFromFileURLs: true,
@@ -301,6 +316,12 @@ class _GameScreenState extends State<GameScreen> {
                   useWideViewPort: false,
                   disableContextMenu: true,
                   algorithmicDarkeningAllowed: false,
+                  // Nothing on the page is scrollable, but an overscroll glow
+                  // or bounce would still eat the start of a drag.
+                  overScrollMode: OverScrollMode.NEVER,
+                  disallowOverScroll: true,
+                  verticalScrollBarEnabled: false,
+                  horizontalScrollBarEnabled: false,
                 ),
                 onWebViewCreated: _bridge.attach,
                 onLoadStop: (controller, url) => _bridge.onPageLoaded(),

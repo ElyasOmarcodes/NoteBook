@@ -68,6 +68,7 @@ export const ANIM = {
   STEP_UP: 'stepUp',
   FIRE: 'fire',
   RELOAD: 'reload',
+  SWAP: 'swap',
   MELEE: 'melee',
   RESUPPLY: 'resupply',
   DEAD: 'dead',

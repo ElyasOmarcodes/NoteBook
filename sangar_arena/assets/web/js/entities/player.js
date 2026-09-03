@@ -11,6 +11,9 @@ import { equipOnSoldier, ViewModel } from './weapons.js';
  * and optics, grenades, melee, ammo resupply, and the camera that rides on top
  * of all of it.
  */
+/** How long the two weapons take to change hands, in seconds. */
+const SWAP_SECONDS = 0.85;
+
 export class LocalPlayer {
   constructor(scene, world, map, camera, opts) {
     this.scene = scene;
@@ -61,6 +64,10 @@ export class LocalPlayer {
     this.reloadTimer = 0;
     this.meleeTimer = 0;
     this.resupplyTimer = 0;
+    this.swapTimer = 0;
+    this._swapPending = false;
+    /** Seconds since the last shot; the weapon stays up for a moment after. */
+    this.sinceFire = 99;
     this.shotsThisFrame = 0;
     // Recoil is a *view offset*, not a change to the aim itself. Integrating
     // it into `pitch` (as this used to) meant every shot permanently walked
@@ -428,6 +435,8 @@ export class LocalPlayer {
   _weapons(dt, input, hooks) {
     this.fireTimer -= dt;
     this.meleeTimer -= dt;
+    this.swapTimer -= dt;
+    this.sinceFire += dt;
 
     // ---- reload ----
     if (this.reloadTimer > 0) {
@@ -464,13 +473,23 @@ export class LocalPlayer {
     }
 
     // ---- swap ----
-    if (input.consumePress?.('swap') && this.reloadTimer <= 0) {
+    // A swap is a movement, not a substitution: the weapon comes down, the two
+    // actually change hands at the bottom of the swing, then the new one comes
+    // back up. `_swapPending` holds the exchange until that midpoint.
+    if (input.consumePress?.('swap') && this.reloadTimer <= 0
+        && this.swapTimer <= 0) {
+      this.swapTimer = SWAP_SECONDS;
+      this._swapPending = true;
+      this.soldier.playOverlay(ANIM.SWAP, SWAP_SECONDS);
+      this.ads = false;
+      this.scoped = false;
+      this.fireTimer = Math.max(this.fireTimer, SWAP_SECONDS * 0.7);
+    }
+    if (this._swapPending && this.swapTimer <= SWAP_SECONDS * 0.55) {
+      this._swapPending = false;
       this.held = this.held === 0 ? 1 : 0;
       this.viewModel.setWeapon(this.weapon);
       equipOnSoldier(this.soldier, this.weapon, this.weapons[1 - this.held]);
-      this.ads = false;
-      this.scoped = false;
-      this.fireTimer = Math.max(this.fireTimer, 0.35);
       hooks.onSwap?.(this.weapon);
     }
 
@@ -522,7 +541,7 @@ export class LocalPlayer {
   canFire() {
     return this.alive && this.fireTimer <= 0 && this.reloadTimer <= 0
       && this.meleeTimer <= 0 && this.resupplyTimer <= 0 && !this.sprinting
-      && !this.onLadder;
+      && this.swapTimer <= 0 && !this.onLadder;
   }
 
   startReload(hooks) {
@@ -584,8 +603,9 @@ export class LocalPlayer {
 
     hooks.onFire?.({
       origin, direction: base, shots, weapon,
-      muzzle: this.viewModel.muzzleWorld,
+      muzzle: this.muzzleWorld,
     });
+    this.sinceFire = 0;
     this.soldier.playOverlay(ANIM.FIRE, 0.10);
   }
 
@@ -617,7 +637,15 @@ export class LocalPlayer {
     }
 
     s.place(this.body.position, this.yaw);
-    s.update(dt, { speed, aimPitch: this.pitch });
+    // The weapon only comes up when there is a reason for it: aiming, having
+    // just fired, working the action, or a swing. Otherwise it rides at the
+    // chest with the muzzle down, the way it is actually carried.
+    const ready = this.ads || this.scoped
+      || this.sinceFire < 1.6
+      || this.reloadTimer > 0
+      || this.meleeTimer > 0
+      || this.swapTimer > 0;
+    s.update(dt, { speed, aimPitch: this.pitch, ads: this.ads, ready });
 
     if (s.footstepFired) {
       s.footstepFired = false;
@@ -632,6 +660,22 @@ export class LocalPlayer {
       reloading: this.reloadTimer > 0,
       lookDelta: { x: this.recoilYaw, y: this.recoilPitch },
     });
+  }
+
+  /**
+   * Where the flash, the brass and the tracers come from.
+   *
+   * In first person that is the viewmodel's muzzle, which rides on the view
+   * camera. In third person that camera sits metres behind the soldier, so
+   * using it there threw every tracer out of the back of the player's head —
+   * the muzzle of the weapon actually in their hands is the honest source.
+   */
+  get muzzleWorld() {
+    if (this.thirdPerson) {
+      const held = this.soldier?.heldModel?.userData?.muzzle;
+      if (held) return held.getWorldPosition(new THREE.Vector3());
+    }
+    return this.viewModel.muzzleWorld;
   }
 
   _camera(dt) {

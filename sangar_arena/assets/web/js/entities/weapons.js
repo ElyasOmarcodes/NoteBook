@@ -265,6 +265,7 @@ const HAND_SCALE = 100;
  */
 export function equipOnSoldier(soldier, heldDef, slungDef) {
   soldier.alignGrip = null;
+  soldier.poseWeapon = null;
   if (soldier.heldModel) {
     soldier.weaponAnchor.remove(soldier.heldModel);
     disposeWeapon(soldier.heldModel);
@@ -288,6 +289,7 @@ export function equipOnSoldier(soldier, heldDef, slungDef) {
     soldier.heldModel = model;
     alignToBody(soldier, soldier.weaponAnchor, model, CARRY_CANT,
       HAND_SCALE, [0, -0.02, 0.01]);
+    soldier.poseWeapon = (t) => setCarryPose(soldier, t);
   }
   if (slungDef) {
     const model = buildWeapon(slungDef);
@@ -301,8 +303,10 @@ export function equipOnSoldier(soldier, heldDef, slungDef) {
   return soldier;
 }
 
-/** How the carried weapon sits in the fist: muzzle a touch down and inboard. */
+/** Weapon levelled, ready to fire: muzzle a touch down and inboard. */
 const CARRY_CANT = new THREE.Euler(0.12, 0.10, 0.04);
+/** Weapon carried at the chest with the muzzle angled at the ground. */
+const LOW_READY_CANT = new THREE.Euler(0.60, 0.24, 0.06);
 /** Spare weapon: rolled onto its side and hung muzzle-down across the back. */
 const SLING_CANT = new THREE.Euler(-1.05, Math.PI, -0.45);
 
@@ -328,6 +332,9 @@ function alignToBody(soldier, anchor, model, cant, scale = HAND_SCALE, offset = 
 
     // Takes a vector written in the soldier's own axes into the bone's.
     const intoBone = hand.invert().multiply(body);
+    // Kept so the carry angle can be re-driven every frame without measuring
+    // the rig again.
+    model.userData.intoBone = intoBone.clone();
     model.quaternion.copy(intoBone)
       .multiply(new THREE.Quaternion().setFromEuler(cant));
     model.scale.setScalar(scale);
@@ -343,4 +350,26 @@ function alignToBody(soldier, anchor, model, cant, scale = HAND_SCALE, offset = 
   apply();
   const pending = soldier.alignGrip;
   soldier.alignGrip = pending ? () => { pending(); apply(); } : apply;
+}
+
+const _lowQ = new THREE.Quaternion();
+const _upQ = new THREE.Quaternion();
+
+/**
+ * Swings the held weapon between low ready and levelled.
+ *
+ * Driven every frame from the soldier's own `ready` blend, so the muzzle
+ * follows the arms instead of staying level while the elbows drop.
+ *
+ * @param {object} soldier
+ * @param {number} t 0 carried low, 1 levelled
+ */
+export function setCarryPose(soldier, t) {
+  const model = soldier.heldModel;
+  const into = model?.userData?.intoBone;
+  if (!into) return;
+  _lowQ.setFromEuler(LOW_READY_CANT);
+  _upQ.setFromEuler(CARRY_CANT);
+  _lowQ.slerp(_upQ, THREE.MathUtils.clamp(t, 0, 1));
+  model.quaternion.copy(into).multiply(_lowQ);
 }

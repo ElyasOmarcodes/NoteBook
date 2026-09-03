@@ -28,6 +28,10 @@ export class TouchControls {
     this.pressed = new Set();
 
     this._pointers = new Map();
+    // Some Android WebViews deliver pointer events but not touch events. The
+    // pads listen for both and let whichever family actually arrives drive
+    // them, so a device that only speaks one is still playable.
+    this._sawTouch = false;
     this._moveStick = root.querySelector('#stick-move');
     this._moveKnob = this._moveStick?.querySelector('.stick-knob');
     this._lookPad = root.querySelector('#stick-look');
@@ -85,13 +89,38 @@ export class TouchControls {
       }
     };
 
-    el.addEventListener('touchstart', start, { passive: false });
+    this._listen(el, start, move, end);
+  }
+
+  /**
+   * Wires one pad to both event families.
+   *
+   * Touch events win where they exist; pointer events of type "touch" are only
+   * acted on until the first real touchstart proves they are redundant, which
+   * stops a device that fires both from moving the stick twice as fast.
+   */
+  _listen(el, start, move, end) {
+    el.addEventListener('touchstart', (e) => { this._sawTouch = true; start(e); },
+      { passive: false });
     el.addEventListener('touchmove', move, { passive: false });
     el.addEventListener('touchend', end);
     el.addEventListener('touchcancel', end);
-    el.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'touch') start(e); });
-    window.addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch') move(e); });
-    window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch') end(e); });
+    el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch' && this._sawTouch) return;
+      // Keep receiving moves once the finger leaves the element.
+      try { el.setPointerCapture(e.pointerId); } catch { /* not supported */ }
+      start(e);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch' && this._sawTouch) return;
+      move(e);
+    });
+    const up = (e) => {
+      if (e.pointerType === 'touch' && this._sawTouch) return;
+      end(e);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
   }
 
   /** Below this fraction of the stick's travel, the thumb is treated as still. */
@@ -175,13 +204,38 @@ export class TouchControls {
       }
     };
 
-    el.addEventListener('touchstart', start, { passive: false });
+    this._listen(el, start, move, end);
+  }
+
+  /**
+   * Wires one pad to both event families.
+   *
+   * Touch events win where they exist; pointer events of type "touch" are only
+   * acted on until the first real touchstart proves they are redundant, which
+   * stops a device that fires both from moving the stick twice as fast.
+   */
+  _listen(el, start, move, end) {
+    el.addEventListener('touchstart', (e) => { this._sawTouch = true; start(e); },
+      { passive: false });
     el.addEventListener('touchmove', move, { passive: false });
     el.addEventListener('touchend', end);
     el.addEventListener('touchcancel', end);
-    el.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'touch') start(e); });
-    window.addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch') move(e); });
-    window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch') end(e); });
+    el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch' && this._sawTouch) return;
+      // Keep receiving moves once the finger leaves the element.
+      try { el.setPointerCapture(e.pointerId); } catch { /* not supported */ }
+      start(e);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch' && this._sawTouch) return;
+      move(e);
+    });
+    const up = (e) => {
+      if (e.pointerType === 'touch' && this._sawTouch) return;
+      end(e);
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
   }
 
   _bindButtons() {
@@ -211,12 +265,21 @@ export class TouchControls {
         if (held.has(name)) this.buttons[name] = false;
         el.classList.remove('on');
       };
-      el.addEventListener('touchstart', down, { passive: false });
+      el.addEventListener('touchstart', (e) => { this._sawTouch = true; down(e); },
+        { passive: false });
       el.addEventListener('touchend', up);
       el.addEventListener('touchcancel', up);
-      el.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'touch') down(e); });
-      el.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch') up(e); });
-      el.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') up(e); });
+      el.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'touch' && this._sawTouch) return;
+        down(e);
+      });
+      const pUp = (e) => {
+        if (e.pointerType === 'touch' && this._sawTouch) return;
+        up(e);
+      };
+      el.addEventListener('pointerup', pUp);
+      el.addEventListener('pointercancel', pUp);
+      el.addEventListener('pointerleave', pUp);
       el.addEventListener('contextmenu', (e) => e.preventDefault());
     }
   }
