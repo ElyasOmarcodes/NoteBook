@@ -44,6 +44,7 @@ class _GameScreenState extends State<GameScreen> {
   bool _paused = false;
   bool _booted = false;
   bool _serverReady = false;
+  bool _quitting = false;
   String? _engineError;
 
   MatchSession get session => widget.session;
@@ -173,6 +174,15 @@ class _GameScreenState extends State<GameScreen> {
   // ---- session -> engine -------------------------------------------------
 
   void _onSessionEvent(SessionEvent event) {
+    // The end of a match moves the player to the results screen, and that must
+    // happen whether or not the engine is up. It used to sit behind the
+    // engine-ready guard below, so a match whose clock ran out while the
+    // WebView was not reporting ready simply stranded the player in it.
+    if (event.type == Proto.matchEnd) {
+      _bridge.send({'t': 'end'});
+      _showResults();
+      return;
+    }
     if (!_bridge.engineReady) return;
     switch (event.type) {
       case Proto.snapshot:
@@ -185,9 +195,6 @@ class _GameScreenState extends State<GameScreen> {
         _bridge.send({'t': 'respawn', ...event.data});
       case Proto.grenade:
         _bridge.send({'t': 'nade', ...event.data});
-      case Proto.matchEnd:
-        _bridge.send({'t': 'end'});
-        _showResults();
       case Proto.start:
         _pushRoster();
     }
@@ -254,14 +261,23 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   Future<void> _quit() async {
+    if (_quitting) return;
+    _quitting = true;
+    // Nothing may push the results screen once the player has asked to leave.
+    _resultsShown = true;
     _bridge.stop();
+
+    // Leave first, tear down after. Closing a networked session waits on
+    // sockets that a dropped hotspot will never answer, and the player was
+    // being held inside the match for as long as that took.
+    if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+
     if (session.isSolo) {
       session.endSoloMatch();
     } else {
-      await session.close();
+      await session.close()
+          .timeout(const Duration(seconds: 3), onTimeout: () {});
     }
-    if (!mounted) return;
-    Navigator.of(context).popUntil((r) => r.isFirst);
   }
 
   void _togglePause() {
@@ -337,18 +353,33 @@ class _GameScreenState extends State<GameScreen> {
               ),
             ),
 
-            // A small pause affordance; everything else is drawn by the engine.
+            // Pause, and a way straight out. Everything else is drawn by the
+            // engine. The exit is its own button rather than only living
+            // inside the pause sheet, so leaving is never more than one tap.
             Positioned(
               top: 4,
               left: 0,
               right: 0,
               child: Center(
                 child: SafeArea(
-                  child: IconButton(
-                    onPressed: _togglePause,
-                    icon: const Icon(Icons.pause_circle_outline),
-                    color: Colors.white70,
-                    iconSize: 26,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        onPressed: _togglePause,
+                        icon: const Icon(Icons.pause_circle_outline),
+                        color: Colors.white70,
+                        iconSize: 26,
+                        tooltip: s.pause,
+                      ),
+                      IconButton(
+                        onPressed: _quit,
+                        icon: const Icon(Icons.exit_to_app),
+                        color: Colors.white70,
+                        iconSize: 24,
+                        tooltip: s.backToMenu,
+                      ),
+                    ],
                   ),
                 ),
               ),

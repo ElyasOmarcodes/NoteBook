@@ -154,6 +154,8 @@ const BONES = {
   thighR: 'RightUpLeg',
   shinR: 'RightLeg',
   footR: 'RightFoot',
+  toeL: 'LeftToeBase',
+  toeR: 'RightToeBase',
 };
 
 /** `mixamorig:LeftForeArm` and `mixamorig_LeftForeArm` both -> `leftforearm`. */
@@ -498,9 +500,36 @@ export class Soldier {
     this.slingAnchor = this.bones.chest ?? this.body;
 
     this._normaliseHeight(model);
+    this._faceForward(model);
     this._addTeamBand();
 
     this.ready = true;
+  }
+
+  /**
+   * Turns the model to face the way the engine thinks forward is.
+   *
+   * Three of the four characters were exported facing -Z and one facing +Z, so
+   * assuming either one leaves some of them running backwards with the camera
+   * looking at their face. Toes are the honest answer: on every one of these
+   * rigs the toe bone sits in front of the ankle, whichever way the artist
+   * pointed the mesh.
+   */
+  _faceForward(model) {
+    const pairs = [[this.bones.toeL, this.bones.footL],
+      [this.bones.toeR, this.bones.footR]];
+    const toe = new THREE.Vector3();
+    const heel = new THREE.Vector3();
+    let ahead = 0;
+    model.updateWorldMatrix(true, true);
+    for (const [t, f] of pairs) {
+      if (!t || !f) continue;
+      t.getWorldPosition(toe);
+      f.getWorldPosition(heel);
+      ahead += toe.z - heel.z;
+    }
+    // The engine's soldiers walk down +Z, so toes must end up on the +Z side.
+    if (ahead < 0) model.rotation.y += Math.PI;
   }
 
   /**

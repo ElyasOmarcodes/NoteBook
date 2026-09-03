@@ -135,11 +135,8 @@ class WeaponCard extends StatelessWidget {
               child: WeaponSilhouette(kind: weapon.kind),
             ),
             const SizedBox(height: 6),
-            StatBar(label: s.damage, value: weapon.damageBar),
-            StatBar(
-                label: s.fireRate,
-                value: weapon.rateBar,
-                color: AppPalette.teal),
+            // Damage and rate of fire are stated as real numbers below, so
+            // they do not also need a bar; these two have no plain unit.
             StatBar(
                 label: s.accuracy,
                 value: weapon.accuracyBar,
@@ -148,6 +145,24 @@ class WeaponCard extends StatelessWidget {
                 label: s.range,
                 value: weapon.rangeBar,
                 color: AppPalette.accentSoft),
+            const SizedBox(height: 8),
+            // The real numbers, not just bars: how fast it fires, how much a
+            // round takes off, and how many of them it takes to drop someone.
+            Text(
+              '${weapon.roundsPerSecond.toStringAsFixed(1)} ${s.perSecond}'
+              '  ·  ${weapon.damage}${weapon.pellets > 1 ? '×${weapon.pellets}' : ''} ${s.perHit}',
+              style: const TextStyle(fontSize: 11, color: AppPalette.textLow),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Pill(
+                    label: '${s.toKillHead} ${weapon.headShotsToKill}',
+                    color: AppPalette.danger),
+                const SizedBox(width: 6),
+                Pill(label: '${s.toKillBody} ${weapon.bodyShotsToKill}'),
+              ],
+            ),
             const SizedBox(height: 6),
             Row(
               children: [

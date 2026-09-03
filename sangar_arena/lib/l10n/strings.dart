@@ -88,6 +88,10 @@ class Strings {
   String get tabControls => _('کنټرولونه', 'Controls');
   String get tabCharacter => _('کرکټر', 'Character');
   String get tabWeapons => _('وسلې', 'Weapons');
+  String get perSecond => _('فایر/ثانیه', 'shots/s');
+  String get perHit => _('فی ولګېدنه', 'per hit');
+  String get toKillHead => _('سر:', 'Head:');
+  String get toKillBody => _('بدن:', 'Body:');
   String get credits => _('مننه او منابع', 'Credits');
   String get creditsIntro => _(
       'د دې لوبې د اسلحو ټول ۳D موډلونه ریښتیني موډلونه دي، چې د CC BY 4.0 '

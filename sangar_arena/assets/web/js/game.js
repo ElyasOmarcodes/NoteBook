@@ -20,6 +20,19 @@ import { QUALITY, COMBAT, MAP_SIZE, ANIM } from './config.js';
  * All outbound traffic goes through `bridge.send`, which the Flutter side
  * picks up; all inbound commands arrive through `handle()`.
  */
+/**
+ * How much a hit is worth by where it lands.
+ *
+ * The head multiplier is per weapon rather than global, because "how many
+ * shots to the head" is part of what a weapon *is*: a rifle that needs two and
+ * a sniper that needs one cannot share one number.
+ */
+function zoneMultiplier(zone, weapon) {
+  if (zone === 'head') return weapon.headshot ?? COMBAT.headMultiplier;
+  if (zone === 'limb') return weapon.limb ?? COMBAT.limbMultiplier;
+  return COMBAT.torsoMultiplier;
+}
+
 export class Game {
   constructor(canvas, bridge) {
     this.canvas = canvas;
@@ -77,7 +90,7 @@ export class Game {
     this._progress(0.15, 'World');
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
-      75, window.innerWidth / window.innerHeight, 0.05, 700);
+      60, window.innerWidth / window.innerHeight, 0.05, 700);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
 
@@ -168,6 +181,10 @@ export class Game {
       powerPreference: 'high-performance',
       stencil: false,
     });
+    // Anything not covered by geometry shows this, and the second render pass
+    // clears with it too. Black here is what the sky's clipped edge used to
+    // reveal.
+    this.renderer.setClearColor(0x8fb6d4, 1);
     this.renderer.setPixelRatio(Math.min(
       window.devicePixelRatio || 1,
       this.quality.pixelRatio * (this.settings.renderScale ?? 1)));
@@ -272,12 +289,6 @@ export class Game {
 
     // The shadow camera follows the player so the map's shadow budget is spent
     // where it is actually visible.
-    if (this.sun?.castShadow) {
-      const p = this.player.body.position;
-      this.sun.position.set(p.x + 72, 120, p.z + 46);
-      this.sun.target.position.set(p.x, 0, p.z);
-      this.sun.target.updateMatrixWorld();
-    }
 
     this._clock.getDelta();
     if (this.matchRunning) {
@@ -382,8 +393,7 @@ export class Game {
       if (!hit) continue;
       if (hit.actor) {
         const zone = hit.zone;
-        const mult = zone === 'head' ? COMBAT.headMultiplier
-          : zone === 'limb' ? COMBAT.limbMultiplier : COMBAT.torsoMultiplier;
+        const mult = zoneMultiplier(zone, weapon);
         // Range falloff: past the weapon's rated range damage tails off fast.
         const over = Math.max(0, hit.distance - weapon.range);
         const falloff = Math.max(0.35, 1 - over / (weapon.range * 0.8));
@@ -408,8 +418,7 @@ export class Game {
     this.effects.tracer(origin, end);
     if (!hit) return;
     if (hit.actor === this.player) {
-      const mult = hit.zone === 'head' ? COMBAT.headMultiplier
-        : hit.zone === 'limb' ? COMBAT.limbMultiplier : 1;
+      const mult = zoneMultiplier(hit.zone, weapon);
       this._selfDamage(weapon.damage * mult, dir, bot.name);
       this.effects.blood(hit.point, dir);
     } else if (hit.actor) {

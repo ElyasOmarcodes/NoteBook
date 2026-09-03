@@ -85,6 +85,7 @@ class WeaponDef {
     this.scope = false,
     this.scopeZoom = 2.0,
     this.pellets = 1,
+    this.headshot = 2.0,
     this.automatic = true,
   });
 
@@ -104,6 +105,22 @@ class WeaponDef {
   final bool scope;
   final double scopeZoom;
   final int pellets;
+
+  /// Multiplier for a hit to the head. Per weapon, because "two to the head"
+  /// versus "one to the head" is part of what a weapon is.
+  final double headshot;
+
+  /// Rounds a second, from the rated rate of fire.
+  double get roundsPerSecond => rpm / 60.0;
+
+  /// How many body shots it takes to drop a full-health opponent. A shotgun
+  /// fires a pattern, so its damage counts per pellet.
+  int get bodyShotsToKill =>
+      (100 / (damage * pellets)).ceil().clamp(1, 99);
+
+  /// How many head shots it takes.
+  int get headShotsToKill =>
+      (100 / (damage * pellets * headshot)).ceil().clamp(1, 99);
   final bool automatic;
 
   /// Normalised bars for the UI.
@@ -127,6 +144,7 @@ class WeaponDef {
         'scopeZoom': scopeZoom,
         'pellets': pellets,
         'automatic': automatic,
+        'headshot': headshot,
       };
 }
 
@@ -292,7 +310,8 @@ class Catalog {
       namePs: 'سنګر AK',
       nameEn: 'Sangar AK',
       kind: WeaponKind.rifle,
-      damage: 34,
+      damage: 20,
+      headshot: 2.5,
       rpm: 600,
       magazine: 30,
       reserve: 270,
@@ -306,7 +325,8 @@ class Catalog {
       namePs: 'کنډک M4',
       nameEn: 'Kandak M4',
       kind: WeaponKind.rifle,
-      damage: 28,
+      damage: 18,
+      headshot: 2.8,
       rpm: 780,
       magazine: 30,
       reserve: 270,
@@ -322,7 +342,8 @@ class Catalog {
       namePs: 'طوفان MP',
       nameEn: 'Toofan MP',
       kind: WeaponKind.smg,
-      damage: 21,
+      damage: 14,
+      headshot: 2.4,
       rpm: 900,
       magazine: 32,
       reserve: 256,
@@ -336,7 +357,8 @@ class Catalog {
       namePs: 'هندوکش SVD',
       nameEn: 'Hindukush SVD',
       kind: WeaponKind.sniper,
-      damage: 88,
+      damage: 50,
+      headshot: 2.0,
       rpm: 55,
       magazine: 10,
       reserve: 60,
@@ -353,7 +375,8 @@ class Catalog {
       namePs: 'شمشاد DMR',
       nameEn: 'Shamshad DMR',
       kind: WeaponKind.marksman,
-      damage: 52,
+      damage: 34,
+      headshot: 2.0,
       rpm: 240,
       magazine: 20,
       reserve: 140,
@@ -370,7 +393,8 @@ class Catalog {
       namePs: 'پېښور SG',
       nameEn: 'Pekhawar SG',
       kind: WeaponKind.shotgun,
-      damage: 15,
+      damage: 13,
+      headshot: 1.5,
       rpm: 75,
       magazine: 8,
       reserve: 48,
@@ -386,7 +410,8 @@ class Catalog {
       namePs: 'غازي LMG',
       nameEn: 'Ghazi LMG',
       kind: WeaponKind.lmg,
-      damage: 30,
+      damage: 19,
+      headshot: 2.3,
       rpm: 700,
       magazine: 75,
       reserve: 300,
@@ -400,7 +425,8 @@ class Catalog {
       namePs: 'تیره پستول',
       nameEn: 'Teera Pistol',
       kind: WeaponKind.pistol,
-      damage: 26,
+      damage: 25,
+      headshot: 2.2,
       rpm: 420,
       magazine: 15,
       reserve: 90,

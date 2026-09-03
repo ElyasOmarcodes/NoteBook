@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
 import { Batcher } from './batcher.js';
 import { aabb } from './geom.js';
-import { material, signTexture, skyTexture } from './textures.js';
+import { material, signTexture } from './textures.js';
 import {
   place, scaleUV, gableRoof, skylight, kerb, oilTank, container,
   drumCluster, palletStack, chainFence, chainLinkMaterial, pipeRun, smokestack,
@@ -865,40 +865,52 @@ export class ArenaMap {
 
 /** Sky dome and lighting, tuned to the cold overcast of the references. */
 export function buildSky(scene, quality) {
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(620, 24, 16),
-    new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide, fog: false }),
-  );
-  sky.name = 'sky';
-  scene.add(sky);
+  // One flat colour, and it lives on the scene rather than on a sphere.
+  //
+  // The sky used to be a textured sphere of radius 620 centred on the origin,
+  // while the camera's far plane is 700. Stand 90 m from the middle of the map
+  // and the far side of that sphere is 710 m away — clipped — and what showed
+  // through the hole was the renderer's black clear colour. That is the black
+  // void that appeared over roofs and tanks depending on where you stood and
+  // which way you looked. A scene background cannot be clipped, and it is the
+  // single colour that was asked for.
+  const SKY = new THREE.Color(0x8fb6d4);
+  scene.background = SKY;
+  scene.fog = new THREE.Fog(SKY.getHex(), 90, quality.fog);
 
-  scene.fog = new THREE.Fog(0xa9c0d0, 70, quality.fog);
-
-  const hemi = new THREE.HemisphereLight(0xbcd4e6, 0x5b584f, 1.25);
+  const hemi = new THREE.HemisphereLight(0xc6dcee, 0x6a675c, 1.45);
   scene.add(hemi);
-  scene.add(new THREE.AmbientLight(0x9fb2c4, 0.34));
+  scene.add(new THREE.AmbientLight(0xa8bccd, 0.42));
 
-  const sun = new THREE.DirectionalLight(0xfff2dc, 2.1);
-  sun.position.set(72, 120, 46);
+  // The sun is nailed to one direction over the whole map. It used to be moved
+  // to follow the player every frame, so a wall's shadow slid across the
+  // ground as you walked past it and nothing lined up.
+  const sun = new THREE.DirectionalLight(0xfff3e0, 2.35);
+  sun.position.set(120, 190, 84);
+  sun.target.position.set(0, 0, 0);
   if (quality.shadowMap > 0) {
     sun.castShadow = true;
     sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap);
-    sun.shadow.camera.near = 10;
-    sun.shadow.camera.far = 340;
-    const s = 95;
+    sun.shadow.camera.near = 60;
+    sun.shadow.camera.far = 520;
+    // Wide enough to hold the whole yard, so nothing leaves the frustum as the
+    // player crosses the map.
+    const s = 150;
     sun.shadow.camera.left = -s;
     sun.shadow.camera.right = s;
     sun.shadow.camera.top = s;
     sun.shadow.camera.bottom = -s;
-    sun.shadow.bias = -0.0012;
-    sun.shadow.normalBias = 0.035;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.06;
+    sun.shadow.camera.updateProjectionMatrix();
   }
   scene.add(sun);
   scene.add(sun.target);
 
-  const bounce = new THREE.DirectionalLight(0x93a8bb, 0.3);
-  bounce.position.set(-60, 40, -70);
+  const bounce = new THREE.DirectionalLight(0x9ab0c4, 0.34);
+  bounce.position.set(-70, 46, -80);
   scene.add(bounce);
 
+  const sky = null;
   return { sky, sun, hemi };
 }

@@ -95,9 +95,11 @@ export class LocalPlayer {
     // soldier so the player can see their own character, the way the reference
     // game does. First person stays available for optics.
     this.thirdPerson = true;
-    this.cameraDistance = 3.6;   // metres behind
-    this.cameraHeight = 0.75;    // metres above the eye
-    this.cameraSide = 0.55;      // over-the-shoulder offset
+    // Closer than a classic chase rig: at 3.6 m the soldier was a thumbnail
+    // and you could not read which weapon they were carrying.
+    this.cameraDistance = 2.75;  // metres behind
+    this.cameraHeight = 0.58;    // metres above the eye
+    this.cameraSide = 0.46;      // over-the-shoulder offset
     this._camPos = new THREE.Vector3();
     this._aimPoint = new THREE.Vector3();
     this._applyBodyVisibility();
@@ -715,12 +717,18 @@ export class LocalPlayer {
     this.camera.rotation.set(0, 0, 0, 'YXZ');
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.viewYaw + Math.PI;
-    this.camera.rotation.x = -this.viewPitch;
+    // Not negated. It used to be, which inverted the whole vertical axis:
+    // dragging up tilted the view down, and the camera pointed the opposite
+    // way to `lookDirection`, so the shot and the picture disagreed.
+    this.camera.rotation.x = this.viewPitch;
 
     // Field of view narrows with optics, widens a touch when sprinting.
     const zoom = this.scoped ? (this.weapon.scopeZoom ?? 2)
       : this.ads ? 1.28 : 1;
-    const targetFov = (this.sprinting ? 82 : 75) / zoom;
+    // A phone screen is more than twice as wide as it is tall, so a 75-degree
+    // vertical lens throws an enormous horizontal one and anything near the
+    // edge stretches. 60 keeps the corners looking like the middle.
+    const targetFov = (this.sprinting ? 66 : 60) / zoom;
     this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 10);
     this.camera.updateProjectionMatrix();
 
