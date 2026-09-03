@@ -494,6 +494,11 @@ export class Soldier {
     }
 
     this._applyAdditive(dt);
+
+    // The weapon's grip pose is measured from the posed rig rather than
+    // guessed, so it has to wait for the first frame the additive carry pose
+    // has actually been written to the bones.
+    if (this.alignGrip) { this.alignGrip(); this.alignGrip = null; }
   }
 
   /**

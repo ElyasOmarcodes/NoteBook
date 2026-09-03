@@ -88,6 +88,22 @@ class Strings {
   String get tabControls => _('کنټرولونه', 'Controls');
   String get tabCharacter => _('کرکټر', 'Character');
   String get tabWeapons => _('وسلې', 'Weapons');
+  String get credits => _('مننه او منابع', 'Credits');
+  String get creditsIntro => _(
+      'د دې لوبې د اسلحو ټول ۳D موډلونه ریښتیني موډلونه دي، چې د CC BY 4.0 '
+      'جواز لاندې د لاندې هنرمندانو له خوا جوړ شوي:',
+      'Every weapon in this game is a real 3D model, licensed CC BY 4.0 and '
+      'made by the artists below:');
+  String get creditsModels => _(
+      'AK-74 او Glock — Cransh · M16 — Luchador · SMG-90 — TORI106 · '
+      'SCAR-H — TastyTony · Remington 870 — FinBass · M60 — Kingy · '
+      'فراګ بم — hsevencg · د AWP او نورو موډلونو لپاره: FPS X (MIT)',
+      'AK-74 and Glock by Cransh · M16 by Luchador · SMG-90 by TORI106 · '
+      'SCAR-H by TastyTony · Remington 870 by FinBass · M60 by Kingy · '
+      'Frag grenade by hsevencg · AWP and others via FPS X (MIT)');
+  String get creditsEngine => _(
+      'کرکټر: Mixamo · انجن: three.js · لوبه: Flutter',
+      'Character rig: Mixamo · Engine: three.js · Shell: Flutter');
   String get language => _('ژبه', 'Language');
   String get pashto => _('پښتو', 'Pashto');
   String get english => _('انګلیسي', 'English');

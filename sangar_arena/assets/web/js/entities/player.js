@@ -79,7 +79,9 @@ export class LocalPlayer {
     equipOnSoldier(this.soldier, this.weapons[0], this.weapons[1]);
     scene.add(this.soldier.root);
 
-    this.viewModel = new ViewModel(camera);
+    // The held weapon hangs off its own narrow-lens camera (see game.js);
+    // it falls back to the scene camera when one is not supplied.
+    this.viewModel = new ViewModel(opts.viewCamera ?? camera);
     this.viewModel.setWeapon(this.weapons[0]);
 
     // Third person is the default view: the camera rides behind and above the

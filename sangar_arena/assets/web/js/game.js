@@ -84,6 +84,21 @@ export class Game {
     const lights = buildSky(this.scene, this.quality);
     this.sun = lights.sun;
 
+    // The weapon in the player's own hands is drawn in a second pass through a
+    // narrower lens. At the scene's 75-degree field of view anything held near
+    // the eye balloons — a rifle butt would swallow half the screen — so the
+    // viewmodel gets its own camera and its own little scene, laid over the
+    // world with the depth buffer cleared between the two.
+    this.viewScene = new THREE.Scene();
+    this.viewCamera = new THREE.PerspectiveCamera(
+      50, window.innerWidth / window.innerHeight, 0.02, 12);
+    this.viewCamera.rotation.order = 'YXZ';
+    this.viewScene.add(this.viewCamera);
+    this.viewScene.add(new THREE.HemisphereLight(0x9fb6d6, 0x4a4033, 1.15));
+    const viewSun = new THREE.DirectionalLight(0xfff0d8, 1.9);
+    viewSun.position.set(0.6, 1.2, 0.9);
+    this.viewScene.add(viewSun);
+
     this._progress(0.30, 'Sangar Chowk');
     this.map = new ArenaMap(this.quality).build();
     this.scene.add(this.map.group);
@@ -167,6 +182,10 @@ export class Game {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    if (this.viewCamera) {
+      this.viewCamera.aspect = w / h;
+      this.viewCamera.updateProjectionMatrix();
+    }
   }
 
   _spawnLocal(config) {
@@ -175,6 +194,7 @@ export class Game {
       name: config.name,
       team: config.team ?? 0,
       agent: config.agent,
+      viewCamera: this.viewCamera,
       primary: config.primary,
       secondary: config.secondary,
       grenade: config.grenade,
@@ -258,7 +278,29 @@ export class Game {
     this._reportState(dt);
 
     this.controls.endFrame();
+    this._render();
+  }
+
+  /**
+   * Two passes: the world, then the held weapon over the top of it.
+   *
+   * The viewmodel camera rides exactly where the scene camera is, so muzzle
+   * flashes and tracers spawned from the weapon still land in the right place
+   * in the world; only the field of view differs.
+   */
+  _render() {
+    this.camera.updateMatrixWorld();
+    this.viewCamera.position.setFromMatrixPosition(this.camera.matrixWorld);
+    this.viewCamera.quaternion.setFromRotationMatrix(this.camera.matrixWorld);
+    this.viewCamera.updateMatrixWorld(true);
+
+    this.renderer.autoClear = false;
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    // A held weapon is only ever a foot from the eye; without clearing depth
+    // it would be buried inside whatever the player is standing next to.
+    this.renderer.clearDepth();
+    this.renderer.render(this.viewScene, this.viewCamera);
   }
 
   _readInput() {

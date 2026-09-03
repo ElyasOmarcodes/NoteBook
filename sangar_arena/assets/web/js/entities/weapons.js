@@ -157,9 +157,10 @@ export class ViewModel {
     if (box.isEmpty()) return;
 
     const muzzle = this.model.userData?.muzzle;
-    const bore = muzzle
-      ? muzzle.getWorldPosition(new THREE.Vector3()).y
-      : (box.min.y + box.max.y) / 2;
+    const tip = muzzle
+      ? muzzle.getWorldPosition(new THREE.Vector3())
+      : box.getCenter(new THREE.Vector3());
+    const bore = tip.y;
     // Aiming lines up the sight line, not the bore: sitting the bore on the
     // crosshair would leave the player staring at the back of the receiver.
     // The top of the model is the rear sight, the carry handle or the scope,
@@ -167,15 +168,23 @@ export class ViewModel {
     const sight = box.max.y - 0.015;
 
     // box.max.z is the butt of the stock: the closest part to the eye. The
-    // scene camera runs at 75 degrees, so anything held close to the lens
-    // balloons; these clearances keep a full-length rifle readable instead of
-    // filling half the screen with its receiver.
-    const ads = -0.46 - box.max.z;
-    const hip = -0.34 - box.max.z;
-    this.adsPos.set(0, -sight, ads);
+    // viewmodel camera is a 50-degree lens, so the weapon can sit where a real
+    // shooter holds it without the receiver swelling across the screen. The
+    // floor matters as much as the clearance — a hand is about an arm's length
+    // from the eye whatever it is holding, and without it a pistol would end
+    // up pressed against the lens.
+    const ads = -Math.max(0.36, box.max.z + 0.20);
+    const hip = -Math.max(0.40, box.max.z + 0.16);
+    // Slide sideways by the bore offset so the barrel, not the model origin,
+    // ends up under the crosshair.
+    this.adsPos.set(-tip.x, -sight, ads);
     // At the hip the weapon is carried out to the side and canted in, so the
-    // player sees the flank of the gun rather than staring down the tube.
-    this.hipPos.set(0.145, -bore - 0.125, hip);
+    // player sees the flank of the gun rather than staring down the tube. The
+    // offsets scale with how far out the weapon sits, so a pistol held close
+    // to the chest lands in the same corner of the screen as a rifle does
+    // instead of dropping off the bottom edge.
+    const reach = Math.abs(hip);
+    this.hipPos.set(0.30 * reach - tip.x, -bore - 0.22 * reach, hip);
   }
 
   get muzzleWorld() {
@@ -255,6 +264,7 @@ const HAND_SCALE = 100;
  * across their back — so the two-weapon loadout is visible on every player.
  */
 export function equipOnSoldier(soldier, heldDef, slungDef) {
+  soldier.alignGrip = null;
   if (soldier.heldModel) {
     soldier.weaponAnchor.remove(soldier.heldModel);
     disposeWeapon(soldier.heldModel);
@@ -268,23 +278,69 @@ export function equipOnSoldier(soldier, heldDef, slungDef) {
 
   if (heldDef) {
     const model = buildWeapon(heldDef);
-    // The anchor is the rig's right hand bone, whose axes run along the palm.
-    // These offsets seat the grip in the fist and swing the barrel forward,
-    // and the whole thing is scaled to the model's hand rather than to metres.
-    model.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
-    model.position.set(0, -0.06, 0.02);
+    // The anchor is the rig's right hand bone. Its rest orientation is
+    // whatever the animator happened to author, so rather than guessing Euler
+    // angles the pose is measured: cancel the hand's rotation out, and the
+    // weapon's own axes line up with the soldier's — barrel down their
+    // forward axis, sights up — before the carry cant is added on top.
     model.scale.setScalar(HAND_SCALE);
     soldier.weaponAnchor.add(model);
     soldier.heldModel = model;
+    alignToBody(soldier, soldier.weaponAnchor, model, CARRY_CANT,
+      HAND_SCALE, [0, -0.02, 0.01]);
   }
   if (slungDef) {
     const model = buildWeapon(slungDef);
     // Slung muzzle-down across the back, the way a spare weapon is carried.
-    model.rotation.set(0.25, Math.PI, -0.55);
-    model.position.set(-0.06, 0.02, -0.14);
     model.scale.setScalar(HAND_SCALE * 0.95);
     soldier.slingAnchor.add(model);
     soldier.slungModel = model;
+    alignToBody(soldier, soldier.slingAnchor, model, SLING_CANT,
+      HAND_SCALE * 0.95, [0.10, 0.02, -0.17]);
   }
   return soldier;
+}
+
+/** How the carried weapon sits in the fist: muzzle a touch down and inboard. */
+const CARRY_CANT = new THREE.Euler(0.12, 0.10, 0.04);
+/** Spare weapon: rolled onto its side and hung muzzle-down across the back. */
+const SLING_CANT = new THREE.Euler(-1.05, Math.PI, -0.45);
+
+/**
+ * Orients a weapon relative to the soldier's body rather than to the bone it
+ * hangs from, then applies an artistic cant on top.
+ *
+ * The rotation is worked out on the first frame after the rig has been posed,
+ * because in the bind pose the hand is nowhere near where it ends up once the
+ * carry stance is applied.
+ */
+function alignToBody(soldier, anchor, model, cant, scale = HAND_SCALE, offset = [0, 0, 0]) {
+  const apply = () => {
+    if (!model.parent) return;
+    const hand = new THREE.Quaternion();
+    const body = new THREE.Quaternion();
+    anchor.updateWorldMatrix(true, false);
+    // `body` is the yaw node, so this follows wherever the soldier is facing;
+    // `root` carries no rotation and would pin the weapon to the world axes.
+    soldier.body.updateWorldMatrix(true, false);
+    anchor.getWorldQuaternion(hand);
+    soldier.body.getWorldQuaternion(body);
+
+    // Takes a vector written in the soldier's own axes into the bone's.
+    const intoBone = hand.invert().multiply(body);
+    model.quaternion.copy(intoBone)
+      .multiply(new THREE.Quaternion().setFromEuler(cant));
+    model.scale.setScalar(scale);
+    // The bones carry a world scale of 1/100, so an offset written in metres
+    // has to be pushed through the same factor to move the weapon that far.
+    model.position.set(...offset).applyQuaternion(intoBone)
+      .multiplyScalar(scale);
+  };
+  // Run it now so nothing flashes in the wrong place, and again once the rig
+  // has been posed, which is when the measurement is actually meaningful. Both
+  // the held and the slung weapon queue themselves, so chain rather than
+  // overwrite.
+  apply();
+  const pending = soldier.alignGrip;
+  soldier.alignGrip = pending ? () => { pending(); apply(); } : apply;
 }

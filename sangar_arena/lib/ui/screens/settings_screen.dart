@@ -159,6 +159,27 @@ class _GeneralTabState extends State<_GeneralTab> {
             ),
           ),
         ),
+        const SizedBox(height: 14),
+        // The weapon models are used under CC BY 4.0, which asks for the
+        // authors to be named wherever the work is shown.
+        Panel(
+          title: s.credits.toUpperCase(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(s.creditsIntro,
+                  style: const TextStyle(
+                      fontSize: 12.5, height: 1.5, color: AppPalette.textLow)),
+              const SizedBox(height: 8),
+              Text(s.creditsModels,
+                  style: const TextStyle(fontSize: 12.5, height: 1.6)),
+              const SizedBox(height: 8),
+              Text(s.creditsEngine,
+                  style: const TextStyle(
+                      fontSize: 12.5, height: 1.5, color: AppPalette.textLow)),
+            ],
+          ),
+        ),
       ],
     );
   }
