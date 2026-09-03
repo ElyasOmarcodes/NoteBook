@@ -31,4 +31,5 @@ flutter:
     - assets/web/js/entities/
     - assets/web/js/systems/
     - assets/web/models/
+    - assets/web/models/weapons/
     - assets/models/

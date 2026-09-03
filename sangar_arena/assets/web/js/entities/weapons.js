@@ -10,19 +10,35 @@ import * as THREE from '../../vendor/three.module.js';
  */
 
 import { buildWeaponModel, GUN_MATS, turned, slab, rod, ring } from './gunsmith.js';
+import { WEAPON_MODELS, GRENADE_MODEL, instanceModel } from './weaponmodels.js';
 
 /**
  * Builds the 3D model for a weapon definition.
  *
- * The geometry itself lives in `gunsmith.js`, which turns barrels on a lathe
- * and extrudes bevelled outlines for receivers, magazines and stocks.
+ * Every weapon in the catalogue has a real, downloaded firearm model behind it
+ * (see models/weapons/CREDITS.md). `gunsmith.js` stays as the fallback for the
+ * rare case where a file fails to load, so a missing download costs detail
+ * rather than leaving the player empty-handed.
  */
 export function buildWeapon(def) {
+  const real = instanceModel(WEAPON_MODELS[def.id]);
+  if (real) {
+    real.name = `weapon:${def.id}`;
+    real.userData.def = def;
+    return real;
+  }
   return buildWeaponModel(def);
 }
 
-/** A hand grenade: turned body with a fuse assembly, spoon and pull ring. */
+/**
+ * A hand grenade. Frags use the downloaded model; the flash and smoke variants
+ * are tinted versions of the turned body below.
+ */
 export function buildGrenade(kind = 'frag') {
+  if (kind === 'frag') {
+    const real = instanceModel(GRENADE_MODEL);
+    if (real) { real.name = 'grenade:frag'; return real; }
+  }
   const g = new THREE.Group();
   const colours = { frag: 0x3d4a33, flash: 0x8a8d90, smoke: 0x455360 };
   const shell = new THREE.MeshStandardMaterial({
@@ -59,6 +75,18 @@ export function buildGrenade(kind = 'frag') {
 }
 
 /**
+ * Releases a weapon model.
+ *
+ * Instances of the downloaded models share one set of buffers between every
+ * copy on the map, so only the procedurally built fallbacks own their geometry
+ * and may free it.
+ */
+function disposeWeapon(model) {
+  if (model.userData?.real) return;
+  model.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+}
+
+/**
  * The player's own weapon, held in view.
  *
  * Sway, bob, recoil kick and the transition into and out of aimed-down-sights
@@ -75,12 +103,12 @@ export class ViewModel {
     this.def = null;
 
     // The camera looks down its own -Z, so the weapon lives at negative z and
-    // the model is spun 180 degrees to point its muzzle the same way. It is
-    // pushed far enough forward that the stock never reaches the near plane —
-    // otherwise the receiver fills half the screen.
+    // the model is spun 180 degrees to point its muzzle the same way. Both
+    // resting positions are recomputed per weapon in `_fit`, because a real
+    // AK, an M60 and a Glock are nothing like the same size.
     this.hipPos = new THREE.Vector3(0.150, -0.155, -0.50);
     this.adsPos = new THREE.Vector3(0.0, -0.095, -0.40);
-    this.hipRot = new THREE.Euler(0.03, -0.10, 0.05);
+    this.hipRot = new THREE.Euler(0.05, -0.21, 0.07);
     this.adsRot = new THREE.Euler(0, 0, 0);
 
     this.ads = 0;             // 0 hip .. 1 aimed
@@ -97,7 +125,7 @@ export class ViewModel {
   setWeapon(def) {
     if (this.model) {
       this.holder.remove(this.model);
-      this.model.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      disposeWeapon(this.model);
     }
     this.def = def;
     this.model = buildWeapon(def);
@@ -107,8 +135,47 @@ export class ViewModel {
     // Drawn last and without depth conflicts, so the barrel never pokes
     // through a wall the player is standing against.
     this.model.traverse((o) => { if (o.isMesh) o.renderOrder = 5; });
+    this._fit();
     this.holder.add(this.model);
     return this.model;
+  }
+
+  /**
+   * Works out where this particular weapon should rest in view.
+   *
+   * The models are real firearms of very different lengths, so a single hard
+   * coded offset either buries a pistol in the floor of the screen or shoves
+   * an M60's stock through the near plane. Instead: measure the model, push it
+   * forward until its butt clears the camera, and drop it so the bore sits on
+   * the crosshair when aimed.
+   */
+  _fit() {
+    // The model has no parent yet, so its own matrix is its holder-space
+    // matrix and the measurement needs nothing else.
+    this.model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(this.model);
+    if (box.isEmpty()) return;
+
+    const muzzle = this.model.userData?.muzzle;
+    const bore = muzzle
+      ? muzzle.getWorldPosition(new THREE.Vector3()).y
+      : (box.min.y + box.max.y) / 2;
+    // Aiming lines up the sight line, not the bore: sitting the bore on the
+    // crosshair would leave the player staring at the back of the receiver.
+    // The top of the model is the rear sight, the carry handle or the scope,
+    // whichever this weapon actually aims through.
+    const sight = box.max.y - 0.015;
+
+    // box.max.z is the butt of the stock: the closest part to the eye. The
+    // scene camera runs at 75 degrees, so anything held close to the lens
+    // balloons; these clearances keep a full-length rifle readable instead of
+    // filling half the screen with its receiver.
+    const ads = -0.46 - box.max.z;
+    const hip = -0.34 - box.max.z;
+    this.adsPos.set(0, -sight, ads);
+    // At the hip the weapon is carried out to the side and canted in, so the
+    // player sees the flank of the gun rather than staring down the tube.
+    this.hipPos.set(0.145, -bore - 0.125, hip);
   }
 
   get muzzleWorld() {
@@ -190,12 +257,12 @@ const HAND_SCALE = 100;
 export function equipOnSoldier(soldier, heldDef, slungDef) {
   if (soldier.heldModel) {
     soldier.weaponAnchor.remove(soldier.heldModel);
-    soldier.heldModel.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    disposeWeapon(soldier.heldModel);
     soldier.heldModel = null;
   }
   if (soldier.slungModel) {
     soldier.slingAnchor.remove(soldier.slungModel);
-    soldier.slungModel.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    disposeWeapon(soldier.slungModel);
     soldier.slungModel = null;
   }
 

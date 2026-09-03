@@ -9,6 +9,7 @@ import { LocalPlayer } from './entities/player.js';
 import { RemotePlayer } from './entities/remote.js';
 import { Bot, BOT_NAMES } from './entities/bot.js';
 import { preloadSoldier } from './entities/soldier.js';
+import { preloadWeapons } from './entities/weaponmodels.js';
 import { GrenadeSystem } from './entities/grenade.js';
 import { QUALITY, COMBAT, MAP_SIZE, ANIM } from './config.js';
 
@@ -69,6 +70,9 @@ export class Game {
       console.error('soldier model failed to load', e);
       this.bridge.send({ t: 'error', message: `model: ${e}` });
     });
+    // The weapons are real models too, and there are nine of them, so start
+    // them alongside the character rather than after it.
+    const weaponsReady = preloadWeapons();
 
     this._progress(0.15, 'World');
     this.scene = new THREE.Scene();
@@ -101,6 +105,7 @@ export class Game {
 
     this._progress(0.86, 'Soldiers');
     await soldierReady;
+    await weaponsReady;
 
     this._progress(0.92, 'Deploying');
     this._spawnLocal(config);

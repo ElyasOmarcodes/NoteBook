@@ -198,21 +198,22 @@ html, body {
   background: rgba(240,244,250,.82);
   box-shadow: 0 2px 8px rgba(0,0,0,.5);
 }
-/* The look pad is a free area, not a stick. It has to cover the whole right
-   side including the space above the buttons — when it only reached 62% up
-   from the bottom, the action cluster sat on top of nearly all of it and
-   dragging to turn did nothing. Buttons are later siblings, so their touches
-   still win where they overlap. */
+/* The look pad is a free area, not a stick, and it covers the entire screen.
+   Anything narrower fails on some phone: at 62% of the width the action cluster
+   already sat on top of most of it, and on a short screen the move stick and
+   the buttons between them left almost nothing to drag on. Everything the
+   player can actually press — the move stick and the action buttons — sits on
+   a higher layer, so those touches still win where they overlap, and every
+   other drag anywhere on the screen turns the view. */
 .stick-look {
-  left: auto; right: 0; top: 0; bottom: 0;
-  width: 62%; height: 100%;
+  left: 0; right: 0; top: 0; bottom: 0;
+  width: 100%; height: 100%;
   border: none; background: transparent; border-radius: 0;
   z-index: 1;
 }
 .stick-look .stick-knob { display: none; }
 
 body.left-handed .stick:not(.stick-look) { left: auto; right: calc(18px * var(--hud)); }
-body.left-handed .stick-look { right: auto; left: 0; }
 body.left-handed .action-cluster { right: auto; left: calc(12px * var(--hud)); align-items: flex-start; }
 body.left-handed .hud-bottom-left { left: auto; right: 12px; align-items: flex-end; }
 
