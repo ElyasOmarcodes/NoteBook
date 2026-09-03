@@ -21,6 +21,7 @@ class AgentDef {
     required this.speed,
     required this.armour,
     required this.stealth,
+    required this.model,
     this.beard = false,
     this.glasses = false,
     this.female = false,
@@ -31,6 +32,10 @@ class AgentDef {
   final String nameEn;
   final String bioPs;
   final String bioEn;
+
+  /// Which rigged character model the engine puts on the field for this
+  /// agent. One of the ids in assets/web/js/entities/soldier.js CHARACTERS.
+  final String model;
 
   /// Colours are passed straight through to the engine as hex ints.
   final int skin;
@@ -49,6 +54,7 @@ class AgentDef {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'model': model,
         'skin': skin,
         'outfit': outfit,
         'accent': accent,
@@ -182,6 +188,7 @@ class Catalog {
   static const List<AgentDef> agents = [
     AgentDef(
       id: 'zmarai',
+      model: 'marine',
       namePs: 'زمری',
       nameEn: 'Zmarai',
       bioPs: 'زوړ پوځي لارښود، په سنګرونو کې تکړه.',
@@ -197,6 +204,7 @@ class Catalog {
     ),
     AgentDef(
       id: 'shahzad',
+      model: 'swat',
       namePs: 'شهزاد',
       nameEn: 'Shahzad',
       bioPs: 'چټک برید کوونکی، په نږدې جګړه کې خطرناک.',
@@ -213,6 +221,7 @@ class Catalog {
     ),
     AgentDef(
       id: 'karwan',
+      model: 'gasmask',
       namePs: 'کاروان',
       nameEn: 'Karwan',
       bioPs: 'خاموش ښکاري — د لرې واټن نښه ویشتونکی.',
@@ -229,6 +238,7 @@ class Catalog {
     ),
     AgentDef(
       id: 'nazo',
+      model: 'vanguard',
       namePs: 'ناژو',
       nameEn: 'Nazo',
       bioPs: 'د استخباراتو افسره، تېزه او هوښیاره.',
@@ -245,6 +255,7 @@ class Catalog {
     ),
     AgentDef(
       id: 'baaz',
+      model: 'marine',
       namePs: 'باز',
       nameEn: 'Baaz',
       bioPs: 'د بامونو څارونکی، په لوړو ځایونو کې ماهر.',
@@ -259,6 +270,7 @@ class Catalog {
     ),
     AgentDef(
       id: 'spinzar',
+      model: 'swat',
       namePs: 'سپین زر',
       nameEn: 'Spinzar',
       bioPs: 'دروند وسلوال، ډېر زغم لري.',

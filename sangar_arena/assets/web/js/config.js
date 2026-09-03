@@ -45,10 +45,14 @@ export const COMBAT = {
 
 export const TEAM_COLORS = [0x4c8dff, 0xe2574c];
 
+// `pixelRatio` is a cap on the device's own ratio, not a target. A phone at
+// 3x rendering at 1.0 is drawing a third of the pixels its screen has, which
+// is what made distant railings and building edges look like stairs; medium
+// now renders above screen resolution and relies on the cap to hold the cost.
 export const QUALITY = {
-  low:    { shadowMap: 0,    pixelRatio: 0.72, fog: 300, aniso: 1, decals: 24,  particles: 0.5 },
-  medium: { shadowMap: 1024, pixelRatio: 1.0,  fog: 420, aniso: 4, decals: 60,  particles: 1.0 },
-  high:   { shadowMap: 2048, pixelRatio: 1.35, fog: 560, aniso: 8, decals: 110, particles: 1.6 },
+  low:    { shadowMap: 0,    pixelRatio: 1.0, fog: 300, aniso: 4,  decals: 24,  particles: 0.5, msaa: false },
+  medium: { shadowMap: 1024, pixelRatio: 1.6, fog: 460, aniso: 8,  decals: 60,  particles: 1.0, msaa: true },
+  high:   { shadowMap: 2048, pixelRatio: 2.2, fog: 620, aniso: 16, decals: 110, particles: 1.6, msaa: true },
 };
 
 // Animation state names, mirrored by soldier.js poses.

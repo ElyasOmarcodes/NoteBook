@@ -38,3 +38,10 @@ one was re-processed offline so the engine can treat them all the same way:
   up**, and scaled to the weapon's real length in metres.
 
 Together the nine files come to about 3 MB.
+
+## HUD icons
+
+The button glyphs (fire, reload, swap, optic, grenade, jump, crouch, prone,
+melee) come from [Game Icons](https://game-icons.net), by Lorc, Delapouite and
+contributors, licensed **CC BY 3.0**. They ship as CSS masks in `style.css`, so
+`currentColor` still tints them and a pressed button lights up.

@@ -253,11 +253,21 @@ export class ViewModel {
   }
 }
 
+const _worldScale = new THREE.Vector3();
+
 /**
- * The rigged character's bones are authored in centimetres, so anything
- * parented to a hand has to be scaled up to read at the right size in metres.
+ * How much to scale a weapon parented to a bone so it still measures its real
+ * length in metres.
+ *
+ * The four playable characters were exported in different units and are then
+ * normalised on height, so no constant is right for all of them — the bone's
+ * own world scale is the only honest answer.
  */
-const HAND_SCALE = 100;
+function boneScale(anchor, size = 1) {
+  anchor.getWorldScale(_worldScale);
+  const s = Math.abs(_worldScale.x) || 1;
+  return size / s;
+}
 
 /**
  * Attaches a weapon model to a soldier's right hand, and slings the other one
@@ -284,21 +294,19 @@ export function equipOnSoldier(soldier, heldDef, slungDef) {
     // angles the pose is measured: cancel the hand's rotation out, and the
     // weapon's own axes line up with the soldier's — barrel down their
     // forward axis, sights up — before the carry cant is added on top.
-    model.scale.setScalar(HAND_SCALE);
     soldier.weaponAnchor.add(model);
     soldier.heldModel = model;
     alignToBody(soldier, soldier.weaponAnchor, model, CARRY_CANT,
-      HAND_SCALE, [0, -0.02, 0.01]);
+      1, [0, -0.02, 0.01]);
     soldier.poseWeapon = (t) => setCarryPose(soldier, t);
   }
   if (slungDef) {
     const model = buildWeapon(slungDef);
     // Slung muzzle-down across the back, the way a spare weapon is carried.
-    model.scale.setScalar(HAND_SCALE * 0.95);
     soldier.slingAnchor.add(model);
     soldier.slungModel = model;
     alignToBody(soldier, soldier.slingAnchor, model, SLING_CANT,
-      HAND_SCALE * 0.95, [0.10, 0.02, -0.17]);
+      0.95, [0.10, 0.02, -0.17]);
   }
   return soldier;
 }
@@ -318,7 +326,7 @@ const SLING_CANT = new THREE.Euler(-1.05, Math.PI, -0.45);
  * because in the bind pose the hand is nowhere near where it ends up once the
  * carry stance is applied.
  */
-function alignToBody(soldier, anchor, model, cant, scale = HAND_SCALE, offset = [0, 0, 0]) {
+function alignToBody(soldier, anchor, model, cant, size = 1, offset = [0, 0, 0]) {
   const apply = () => {
     if (!model.parent) return;
     const hand = new THREE.Quaternion();
@@ -335,13 +343,15 @@ function alignToBody(soldier, anchor, model, cant, scale = HAND_SCALE, offset = 
     // Kept so the carry angle can be re-driven every frame without measuring
     // the rig again.
     model.userData.intoBone = intoBone.clone();
+    const scale = boneScale(anchor, size);
     model.quaternion.copy(intoBone)
       .multiply(new THREE.Quaternion().setFromEuler(cant));
     model.scale.setScalar(scale);
-    // The bones carry a world scale of 1/100, so an offset written in metres
-    // has to be pushed through the same factor to move the weapon that far.
+    // An offset written in metres has to travel through the same factor, or it
+    // moves the weapon by a hundredth of what it says.
     model.position.set(...offset).applyQuaternion(intoBone)
       .multiplyScalar(scale);
+    model.userData.fitScale = scale;
   };
   // Run it now so nothing flashes in the wrong place, and again once the rig
   // has been posed, which is when the measurement is actually meaningful. Both

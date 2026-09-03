@@ -161,13 +161,23 @@ export class Game {
   _initRenderer() {
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: this.quality.pixelRatio > 1,
+      // Multisampling is what stops a distant railing reading as a staircase.
+      // On a tiled mobile GPU it resolves inside tile memory and is close to
+      // free, so only the lowest preset goes without.
+      antialias: this.quality.msaa !== false,
       powerPreference: 'high-performance',
       stencil: false,
     });
     this.renderer.setPixelRatio(Math.min(
       window.devicePixelRatio || 1,
       this.quality.pixelRatio * (this.settings.renderScale ?? 1)));
+    // Textures are painted once and then seen at every distance, so let them
+    // use as much anisotropy as the device will actually give.
+    this.quality = {
+      ...this.quality,
+      aniso: Math.min(this.quality.aniso,
+        this.renderer.capabilities.getMaxAnisotropy()),
+    };
     this.renderer.shadowMap.enabled = this.settings.shadows
       && this.quality.shadowMap > 0;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;

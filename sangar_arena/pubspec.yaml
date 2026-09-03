@@ -32,4 +32,5 @@ flutter:
     - assets/web/js/systems/
     - assets/web/models/
     - assets/web/models/weapons/
+    - assets/web/models/characters/
     - assets/models/

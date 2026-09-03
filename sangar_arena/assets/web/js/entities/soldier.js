@@ -16,29 +16,114 @@ import { ANIM, TEAM_COLORS } from '../config.js';
  */
 
 const DEG = Math.PI / 180;
-const MODEL_URL = 'models/soldier.glb';
+/**
+ * The playable characters.
+ *
+ * Each is a real rigged model with its own kit and its own baked clips, and
+ * each carries its own alias table because they were authored by different
+ * hands: one calls its walk cycle `Walk`, the others `rifle_walking`. The
+ * engine only ever asks for `idle`, `walk`, `run`, `fire`, `throw` or `die`.
+ *
+ * Provenance is in models/characters/CREDITS.md.
+ */
+export const CHARACTERS = {
+  vanguard: {
+    // Bare locomotion clips: the engine poses the arms onto the weapon itself.
+    url: 'models/characters/vanguard.glb',
+    armed: false,
+    clips: { idle: 'idle', walk: 'walk', run: 'run' },
+  },
+  marine: {
+    url: 'models/characters/marine.glb',
+    // Its clips already hold a rifle, so the engine must not layer its own
+    // carry pose on top or the arms end up splayed.
+    armed: true,
+    clips: {
+      idle: 'rifle_idle', walk: 'rifle_walking', run: 'rifle_walking',
+      fire: 'rifle_shooting', jump: 'rifle_jumping',
+      throw: 'grenade_throw', die: 'dying',
+    },
+  },
+  gasmask: {
+    url: 'models/characters/gasmask.glb',
+    // Its clips already hold a rifle, so the engine must not layer its own
+    // carry pose on top or the arms end up splayed.
+    armed: true,
+    clips: {
+      idle: 'rifle_idle', walk: 'rifle_walking', run: 'rifle_walking',
+      fire: 'rifle_shooting', jump: 'rifle_jumping',
+      throw: 'grenade_throw', die: 'dying',
+    },
+  },
+  swat: {
+    url: 'models/characters/swat.glb',
+    // Its clips already hold a rifle, so the engine must not layer its own
+    // carry pose on top or the arms end up splayed.
+    armed: true,
+    clips: {
+      idle: 'rifle_idle', walk: 'rifle_walking', run: 'rifle_walking',
+      fire: 'rifle_shooting', jump: 'rifle_jumping',
+      throw: 'grenade_throw', die: 'dying',
+    },
+  },
+};
 
-// ---- shared asset, loaded once and cloned per soldier ---------------------
+export const DEFAULT_CHARACTER = 'vanguard';
 
-let assetPromise = null;
-let asset = null;
+/** Every character is scaled to this height in metres, whatever its units. */
+const STAND_HEIGHT = 1.80;
 
-/** Kicks off the model load. Safe to call repeatedly. */
-export function preloadSoldier(url = MODEL_URL) {
-  if (assetPromise) return assetPromise;
-  const loader = new GLTFLoader();
-  assetPromise = loader.loadAsync(url).then((gltf) => {
-    // The source model stands on the origin facing +Z at roughly 1.8 m; the
-    // engine's world uses metres with feet at y = 0, so it drops straight in.
-    const clips = {};
-    for (const clip of gltf.animations) clips[clip.name.toLowerCase()] = clip;
-    asset = { scene: gltf.scene, clips };
-    return asset;
-  });
-  return assetPromise;
+// ---- shared assets, loaded once and cloned per soldier --------------------
+
+/** id -> { scene, clips } once loaded. */
+const assets = new Map();
+const pending = new Map();
+
+/** Resolves a character id to one that actually exists. */
+export function characterId(id) {
+  return CHARACTERS[id] ? id : DEFAULT_CHARACTER;
 }
 
-export function soldierAssetReady() { return asset !== null; }
+/** Loads one character. Safe to call repeatedly. */
+export function preloadCharacter(id = DEFAULT_CHARACTER) {
+  const key = characterId(id);
+  if (assets.has(key)) return Promise.resolve(assets.get(key));
+  if (pending.has(key)) return pending.get(key);
+
+  const def = CHARACTERS[key];
+  const p = new GLTFLoader().loadAsync(def.url).then((gltf) => {
+    const byName = {};
+    for (const clip of gltf.animations) byName[clip.name.toLowerCase()] = clip;
+    // Resolve the aliases now, so the rest of the engine never has to know
+    // which file a soldier came from.
+    const clips = {};
+    for (const [role, name] of Object.entries(def.clips)) {
+      const clip = byName[String(name).toLowerCase()];
+      if (clip) clips[role] = clip;
+    }
+    // Anything unmapped falls back to idle rather than freezing in bind pose.
+    if (!clips.idle) clips.idle = Object.values(byName)[0];
+    if (!clips.walk) clips.walk = clips.idle;
+    if (!clips.run) clips.run = clips.walk;
+    const record = { scene: gltf.scene, clips };
+    assets.set(key, record);
+    pending.delete(key);
+    return record;
+  });
+  pending.set(key, p);
+  return p;
+}
+
+/** Loads every character, so a mid-match model swap never stalls the frame. */
+export function preloadSoldier() {
+  return Promise.all(Object.keys(CHARACTERS).map((id) =>
+    preloadCharacter(id).catch((e) => {
+      console.warn('character failed', id, e);
+      return null;
+    })));
+}
+
+export function soldierAssetReady(id) { return assets.has(characterId(id)); }
 
 /**
  * Mixamo bone names, keyed by the short names the rest of the engine uses.
@@ -349,7 +434,7 @@ export class Soldier {
     this.aimPitch = 0;
     this.ads = 0;
     /** 0 = weapon carried low, 1 = levelled. See `POSE.lowReady`. */
-    this.ready = 0;
+    this.weaponUp = 0;
     this.footstepFired = false;
     this.landPhase = 1;
     this.stepPhase = 1;
@@ -357,12 +442,19 @@ export class Soldier {
     this._stanceBlend = {};
     this.ready = false;
 
-    if (asset) this._build();
+    /** Which of CHARACTERS this soldier wears. */
+    this.character = characterId(agent.model ?? agent.character);
+    // Not loaded yet? The first update tries again; a mid-match model change
+    // never blocks the frame because everything is preloaded at boot.
+    preloadCharacter(this.character).then(() => this._build()).catch(() => {});
+    this._build();
   }
 
-  /** Builds the visual once the shared asset has loaded. */
+  /** Builds the visual once this character's asset has loaded. */
   _build() {
+    const asset = assets.get(this.character);
     if (this.ready || !asset) return;
+    this.armedClips = CHARACTERS[this.character]?.armed === true;
 
     const model = cloneSkinned(asset.scene);
     model.traverse((o) => {
@@ -405,7 +497,79 @@ export class Soldier {
     this.weaponAnchor = this.bones.handR ?? this.body;
     this.slingAnchor = this.bones.chest ?? this.body;
 
+    this._normaliseHeight(model);
+    this._addTeamBand();
+
     this.ready = true;
+  }
+
+  /**
+   * A team-coloured band around the left upper arm.
+   *
+   * Four characters that each carry their own camouflage cannot also be washed
+   * in a team colour without losing the thing that makes them worth having, so
+   * the team reads from a band the way it does on a real exercise.
+   */
+  _addTeamBand() {
+    const arm = this.bones.armL;
+    if (!arm) return;
+    const colour = TEAM_COLORS[this.team] ?? TEAM_COLORS[0];
+    // The bones carry the model's own units, so size the band against them.
+    const scale = new THREE.Vector3();
+    arm.getWorldScale(scale);
+    const unit = 1 / (Math.abs(scale.x) || 1);
+
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.062, 0.066, 0.055, 14, 1, true),
+      new THREE.MeshStandardMaterial({
+        color: colour, roughness: 0.7, metalness: 0.05,
+        emissive: colour, emissiveIntensity: 0.35, side: THREE.DoubleSide,
+      }));
+    band.scale.setScalar(unit);
+    // Down the upper arm, a third of the way to the elbow.
+    const elbow = this.bones.forearmL;
+    if (elbow) band.position.copy(elbow.position).multiplyScalar(0.36);
+    band.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      (elbow ? elbow.position.clone() : new THREE.Vector3(0, 1, 0)).normalize());
+    band.castShadow = false;
+    band.frustumCulled = false;
+    arm.add(band);
+    this.teamBand = band;
+  }
+
+  /**
+   * Scales a character to a common height and stands it on the floor.
+   *
+   * The four models were exported by different hands — one in metres, three in
+   * centimetres, none with its feet exactly on the origin. A mesh bounding box
+   * is no use here: a skinned mesh reports its bind-pose geometry, which for
+   * one of these is an arms-out T with the hands above the head. The skeleton
+   * is the honest ruler, so measure from the feet bones to the head bone.
+   */
+  _normaliseHeight(model) {
+    const head = this.bones.head, footL = this.bones.footL, footR = this.bones.footR;
+    if (!head || !(footL || footR)) return;
+    model.scale.setScalar(1);
+    model.position.set(0, 0, 0);
+    model.updateWorldMatrix(true, true);
+
+    const p = new THREE.Vector3();
+    head.getWorldPosition(p);
+    const headY = p.y;
+    let footY = Infinity;
+    for (const f of [footL, footR]) {
+      if (!f) continue;
+      f.getWorldPosition(p);
+      footY = Math.min(footY, p.y);
+    }
+    const span = headY - footY;
+    if (!(span > 1e-4)) return;
+
+    // The head bone sits at the base of the skull, a little under the crown.
+    const scale = (STAND_HEIGHT * 0.895) / span;
+    model.scale.setScalar(scale);
+    model.position.y = -footY * scale;
   }
 
   /**
@@ -415,19 +579,22 @@ export class Soldier {
    */
   _tint(material) {
     const a = this.agent;
-    // The model's own texture already carries the fabric, webbing and boots.
-    // `color` multiplies it, so a saturated tint would drown that detail and
-    // turn the soldier into a flat silhouette: start from white and pull only
-    // a little way toward the agent's colour.
+    // Each character has its own camouflage, webbing and boots painted into
+    // its texture, and that is the whole point of having four of them. `color`
+    // multiplies that texture, so anything but the faintest wash turns a
+    // marine into a blue silhouette. Keep it to a hint, and let the team read
+    // come from the emissive instead.
     const tint = new THREE.Color(0xffffff)
-      .lerp(new THREE.Color(a.outfit ?? 0x3a3f35), 0.34);
+      .lerp(new THREE.Color(a.outfit ?? 0x9aa08c), 0.10);
     material.color = tint;
-    material.roughness = 0.88;
-    material.metalness = 0.06;
-    // Just enough team glow to tell friend from foe across the yard, without
-    // making the character look lit from inside.
+    material.roughness = 0.86;
+    material.metalness = 0.08;
+    // Barely any glow: enough to warm a silhouette at range, not enough to
+    // paint over the model. Telling friend from foe is the armband's job —
+    // an emissive strong enough to read across the yard turned a black
+    // tactical suit into a flat blue one.
     material.emissive = new THREE.Color(TEAM_COLORS[this.team] ?? TEAM_COLORS[0]);
-    material.emissiveIntensity = 0.035;
+    material.emissiveIntensity = 0.012;
     material.needsUpdate = true;
   }
 
@@ -493,9 +660,9 @@ export class Soldier {
     // `ready` is the weapon coming up: 0 is carried at the chest with the
     // muzzle down, 1 is levelled at whatever the soldier is looking at. It
     // rises fast — a shot must not wait on it — and falls slowly.
-    const targetReady = ctx.ready ? 1 : 0;
-    this.ready += (targetReady - this.ready)
-      * Math.min(1, dt * (targetReady > this.ready ? 14 : 3.2));
+    const targetUp = ctx.ready ? 1 : 0;
+    this.weaponUp += (targetUp - this.weaponUp)
+      * Math.min(1, dt * (targetUp > this.weaponUp ? 14 : 3.2));
 
     // ---- pick and time the baked clip ----
     const [clipName, baseScale] = CLIP_FOR_STATE[this.state] ?? CLIP_FOR_STATE[ANIM.IDLE];
@@ -543,7 +710,7 @@ export class Soldier {
     if (this.alignGrip) { this.alignGrip(); this.alignGrip = null; }
     // Tip the weapon itself down with the arms, so the muzzle follows the
     // hands rather than staying level while the elbows drop.
-    this.poseWeapon?.(this.ready);
+    this.poseWeapon?.(this.weaponUp);
   }
 
   /**
@@ -575,13 +742,18 @@ export class Soldier {
     }
 
     // Weapon carry, unless the arms are busy climbing or the soldier is down.
-    const carryWeight = (1 - (this._stanceBlend.climb ?? 0))
+    let carryWeight = (1 - (this._stanceBlend.climb ?? 0))
       * (1 - (this._stanceBlend.dead ?? 0))
       * (this.state === ANIM.RUN ? 0.55 : 1);
+    // A character whose own clips already hold a rifle needs almost none of
+    // this: an animator has posed those arms far better than a per-bone offset
+    // can, and stacking both splays the elbows. Only the low-ready sag and the
+    // aim lift are worth keeping, and gently.
+    if (this.armedClips) carryWeight *= 0.22;
     add(POSE.carry, carryWeight * (1 - this.ads));
     add(POSE.ads, carryWeight * this.ads);
     // ...and let the arms sag toward low ready whenever the weapon is not up.
-    add(POSE.lowReady, carryWeight * (1 - this.ads) * (1 - this.ready));
+    add(POSE.lowReady, carryWeight * (1 - this.ads) * (1 - this.weaponUp));
 
     // Landing absorb and the step-up hop.
     if (this.state === ANIM.LAND) {

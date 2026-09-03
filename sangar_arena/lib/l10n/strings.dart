@@ -102,8 +102,9 @@ class Strings {
       'SCAR-H by TastyTony · Remington 870 by FinBass · M60 by Kingy · '
       'Frag grenade by hsevencg · AWP and others via FPS X (MIT)');
   String get creditsEngine => _(
-      'کرکټر: Mixamo · انجن: three.js · لوبه: Flutter',
-      'Character rig: Mixamo · Engine: three.js · Shell: Flutter');
+      'کرکټر: Mixamo · ایکنونه: Game Icons (CC BY 3.0) · انجن: three.js · لوبه: Flutter',
+      'Character rig: Mixamo · Icons: Game Icons (CC BY 3.0) · '
+      'Engine: three.js · Shell: Flutter');
   String get language => _('ژبه', 'Language');
   String get pashto => _('پښتو', 'Pashto');
   String get english => _('انګلیسي', 'English');

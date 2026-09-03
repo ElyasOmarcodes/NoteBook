@@ -19,10 +19,6 @@ on:
         type: choice
         options: [release, debug]
         default: release
-      split_abi:
-        description: 'Also produce per-ABI APKs (smaller downloads)'
-        type: boolean
-        default: true
 
 env:
   # Pinned so a Flutter release cannot silently change the build. The Dart in
@@ -129,38 +125,35 @@ jobs:
           cp build/app/outputs/flutter-apk/app-"$mode".apk \
              ../artifacts/SangarArena-universal-"$mode".apk
 
-      # On a push there are no `inputs`, and GitHub coerces the empty value and
-      # `false` to the same thing — so `inputs.split_abi != false` was false on
-      # every push and these APKs were silently never built. Only an explicit
-      # opt-out on a manual run should skip them.
-      - name: Build per-ABI APKs
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.split_abi }}
-        working-directory: ${{ env.PROJECT_DIR }}
+      # One APK, not four. The per-ABI splits only made the download bigger
+      # for someone who has to pick the right one anyway.
+      - name: Compress the APK
         run: |
-          mode="${{ inputs.build_mode || 'release' }}"
-          flutter build apk --"$mode" --split-per-abi
-          for abi in armeabi-v7a arm64-v8a x86_64; do
-            src="build/app/outputs/flutter-apk/app-$abi-$mode.apk"
-            [ -f "$src" ] && cp "$src" "../artifacts/SangarArena-$abi-$mode.apk"
-          done
-          ls -la ../artifacts
+          cd artifacts
+          # GitHub zips whatever it is given, and an APK is already a zip, so
+          # its own archive saves nothing. xz on the raw APK does.
+          xz -9 --threads=0 --keep --force SangarArena-universal-*.apk
+          ls -la
 
-      - name: Report APK sizes
+      - name: Report APK size
         run: |
+          apk=$(ls artifacts/SangarArena-universal-*.apk | head -1)
           {
-            echo "### Sangar Arena APKs"
+            echo "### Sangar Arena APK"
             echo ""
-            echo "| APK | Size |"
-            echo "| --- | ---- |"
-            for f in artifacts/*.apk; do
-              echo "| \`$(basename "$f")\` | $(du -h "$f" | cut -f1) |"
-            done
+            echo "| File | Size |"
+            echo "| ---- | ---- |"
+            echo "| \`$(basename "$apk")\` | $(du -h "$apk" | cut -f1) |"
+            echo "| \`$(basename "$apk").xz\` | $(du -h "$apk.xz" | cut -f1) |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload APKs
+      - name: Upload the APK
         uses: actions/upload-artifact@v4
         with:
           name: SangarArena-APK
-          path: artifacts/*.apk
+          # Only the xz. GitHub would otherwise wrap the plain APK in a second
+          # zip that compresses nothing.
+          path: artifacts/*.apk.xz
+          compression-level: 0
           if-no-files-found: error
           retention-days: 30

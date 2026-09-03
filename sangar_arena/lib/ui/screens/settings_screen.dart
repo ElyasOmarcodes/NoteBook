@@ -7,6 +7,7 @@ import '../../state/settings_controller.dart';
 import '../../theme/app_theme.dart';
 import '../widgets/cards.dart';
 import '../widgets/common.dart';
+import '../widgets/preview_3d.dart';
 
 /// Tabbed settings: general, audio, graphics, controls, character, weapons.
 class SettingsScreen extends StatefulWidget {
@@ -374,6 +375,13 @@ class _CharacterTab extends StatelessWidget {
           Text(s.selectAgent,
               style:
                   const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          // The real model, turning, so what is chosen here is what deploys.
+          Preview3D(
+            kind: 'character',
+            id: Catalog.agentById(settings.agentId).model,
+            height: 190,
+          ),
           const SizedBox(height: 12),
           Expanded(
             child: ListView.separated(
@@ -435,6 +443,8 @@ class _WeaponsTabState extends State<_WeaponsTab> {
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          Preview3D(kind: 'weapon', id: selectedId, height: 150),
           const SizedBox(height: 12),
           Expanded(
             child: ListView.separated(
