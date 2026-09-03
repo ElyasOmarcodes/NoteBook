@@ -66,6 +66,7 @@ export class ArenaMap {
     this._tankFarm();
     this._containerYard();
     this._chowk();
+    this._downtown();
 
     this._connectors();
     this._clutter();
@@ -132,14 +133,17 @@ export class ArenaMap {
   }
 
   /** A wooden stair flight with handrails. */
-  addStairs(x, y, z, facing, steps, { width = 2.0, rise = 0.34, run = 0.42 } = {}) {
+  addStairs(x, y, z, facing, steps,
+    { width = 2.0, rise = 0.34, run = 0.42, mat = 'wood', rails = true } = {}) {
     const fx = Math.sin(facing), fz = Math.cos(facing);
     for (let i = 0; i < steps; i++) {
-      this.box('wood', width, rise, run + 0.06,
+      this.box(mat, width, rise, run + 0.06,
         x + fx * run * (i + 0.5), y + rise * (i + 0.5), z + fz * run * (i + 0.5),
         { ry: facing, density: 1.1 });
     }
     const len = run * steps;
+    const top = { x: x + fx * len, y: y + rise * steps, z: z + fz * len };
+    if (!rails) return top;
     const ox = Math.cos(facing) * width / 2, oz = -Math.sin(facing) * width / 2;
     for (const s of [1, -1]) {
       for (let i = 0; i <= steps; i += 3) {
@@ -158,6 +162,42 @@ export class ArenaMap {
       });
       rail.dispose();
     }
+    return top;
+  }
+
+  /**
+   * A staircase of several flights with a landing at each turn.
+   *
+   * Climbing four metres in one straight run reads as a ramp with lines drawn
+   * on it. Turning at a landing every flight is what makes a stairwell feel
+   * like part of a building, and it gives whoever holds the top something
+   * worth holding.
+   *
+   * @returns {{x:number,y:number,z:number}} the top of the last flight
+   */
+  stairTower(x, y, z, facing, flights,
+    { steps = 8, width = 1.8, rise = 0.34, run = 0.42, mat = 'concrete',
+      landing = 2.2 } = {}) {
+    let at = { x, y, z };
+    const fx = Math.sin(facing), fz = Math.cos(facing);
+    for (let f = 0; f < flights; f++) {
+      at = this.addStairs(at.x, at.y, at.z, facing, steps, { width, rise, run, mat });
+      if (f === flights - 1) break;
+      // A half-landing between flights: somewhere to stand, somewhere to be
+      // caught, and the thing that stops four metres of climb reading as a
+      // ramp with lines on it.
+      const cx = at.x + fx * landing * 0.5, cz = at.z + fz * landing * 0.5;
+      this.box(mat, width + 0.4, 0.26, landing + 0.3, cx, at.y - 0.13, cz,
+        { ry: facing, density: 0.9 });
+      for (const side of [1, -1]) {
+        const ox = Math.cos(facing) * (width / 2 + 0.15);
+        const oz = -Math.sin(facing) * (width / 2 + 0.15);
+        this.box('plate', 0.09, 1.0, landing, cx + ox * side, at.y + 0.5,
+          cz + oz * side, { ry: facing, solid: false, density: 1.0 });
+      }
+      at = { x: at.x + fx * landing, y: at.y, z: at.z + fz * landing };
+    }
+    return at;
   }
 
   /** A narrow plank catwalk between two roofs. */
@@ -602,6 +642,138 @@ export class ArenaMap {
     }
   }
 
+  /**
+   * The south quarter: the part of the yard with real height in it.
+   *
+   * Everything else on this map is a shed on flat ground. Here the ground
+   * itself does the work — a raised concrete terrace split by two streets that
+   * run at the old grade, so walking along them is walking at the bottom of a
+   * 3.6 m canyon with the deck above on both sides. What stands on the deck is
+   * deliberately uneven: a single-storey block you can only reach by catwalk,
+   * a two-storey with an outside stair, a three-storey with a stairwell, and a
+   * shed with nothing at all. Fighting through it means choosing a level.
+   */
+  _downtown() {
+    const DECK = 3.6;                 // terrace height above the yard
+    const blocks = [
+      { x: -12, z: 46, w: 20, d: 21 },
+      { x: -12, z: 76, w: 20, d: 25 },
+      { x: 16, z: 46, w: 20, d: 21 },
+      { x: 16, z: 76, w: 20, d: 25 },
+    ];
+    for (const b of blocks) {
+      this.box('concrete', b.w, DECK, b.d, b.x, DECK / 2, b.z, { density: 0.34 });
+      // A kerb around the lip, so the edge reads before you walk off it.
+      for (const [dx, dz, kw, kd] of [
+        [0, -b.d / 2, b.w, 0.3], [0, b.d / 2, b.w, 0.3],
+        [-b.w / 2, 0, 0.3, b.d], [b.w / 2, 0, 0.3, b.d],
+      ]) {
+        this.box('kerb', kw, 0.26, kd, b.x + dx, DECK + 0.13, b.z + dz,
+          { density: 1.1 });
+      }
+    }
+
+    // ---- what stands on the deck ----
+
+    // Single storey, flat roof, no way up from the deck: the catwalk only.
+    this.box('block', 13, 4.2, 12, -12, DECK + 2.1, 42, { density: 0.4 });
+    this.box('roof', 13.6, 0.3, 12.6, -12, DECK + 4.35, 42, { density: 0.5 });
+
+    // Two storeys with an outside stair and a landing at the first floor.
+    this.box('sidingGrey', 14, 8.4, 15, -12, DECK + 4.2, 78, { density: 0.42 });
+    this.box('roofRed', 14.6, 0.32, 15.6, -12, DECK + 8.56, 78, { density: 0.5 });
+    for (let f = 0; f < 2; f++) {
+      const y = DECK + 3.0 + f * 3.9;
+      for (const zz of [73.5, 78, 82.5]) {
+        this.box('plate', 0.12, 1.5, 2.4, -19.05, y, zz,
+          { solid: false, density: 1.0 });
+      }
+    }
+    // Two flights up the east face, with a half-landing, onto the first floor
+    // gallery and then the roof.
+    this.stairTower(-3.4, DECK, 88.0, Math.PI, 2,
+      { steps: 6, width: 1.7, rise: 0.34, run: 0.42, mat: 'concrete',
+        landing: 2.2 });
+    // The gallery has to begin where the stairs end, not overhang them: a slab
+    // at head height above the second flight is a ceiling to walk into.
+    this.box('plate', 3.2, 0.24, 6.0, -3.4, DECK + 4.05, 77.4, { density: 0.8 });
+    this.addLadder(-4.4, 76.0, DECK + 4.2, DECK + 8.8, -Math.PI / 2, { wood: false });
+
+    // Three storeys with a proper stairwell running up the outside.
+    this.box('block', 15, 12.6, 14, 16, DECK + 6.3, 46, { density: 0.42 });
+    this.box('roof', 15.6, 0.34, 14.6, 16, DECK + 12.77, 46, { density: 0.5 });
+    // Three flights climbing the block's east face, landing by landing.
+    this.stairTower(25.2, DECK, 37.0, 0, 3,
+      { steps: 8, width: 1.7, rise: 0.36, run: 0.42, mat: 'concrete',
+        landing: 2.2 });
+    // A gallery off the top of the stairs and a ladder onto the roof.
+    this.box('plate', 3.4, 0.26, 6.0, 25.2, DECK + 8.5, 52.5, { density: 0.8 });
+    this.addLadder(24.2, 53.5, DECK + 8.7, DECK + 12.95, -Math.PI / 2, { wood: false });
+    this.box('plate', 8.0, 0.26, 3.0, 20.0, DECK + 12.8, 52.8, { density: 0.8 });
+
+    // A storage shed: low, cluttered, and a dead end if you climb it.
+    this.box('sidingBlue', 11, 3.2, 9, 16, DECK + 1.6, 78, { density: 0.45 });
+    this.box('roofBlue', 11.6, 0.28, 9.6, 16, DECK + 3.34, 78, { density: 0.5 });
+    this.addLadder(16, 73.0, DECK, DECK + 3.7, 0, { wood: false });
+
+    // ---- getting up from the streets ----
+
+    // South end of the north-south street: one long flight.
+    this.addStairs(2, 0, 33.5, 0, 11,
+      { width: 3.0, rise: 0.34, run: 0.42, mat: 'concrete' });
+    this.box('concrete', 4.0, 0.3, 3.0, 2, DECK - 0.15, 39.5, { density: 0.8 });
+
+    // The cross street: a switchback climbing the north deck's flank, laid
+    // along the street so neither flight runs into a block.
+    this.stairTower(-6.5, 0, 60.0, -Math.PI / 2, 2,
+      { steps: 6, width: 1.85, rise: 0.34, run: 0.44, mat: 'concrete',
+        landing: 2.2 });
+
+    // South-west corner: a vehicle ramp rather than steps, wide enough to
+    // fight over, running up onto the deck clear of the container yard.
+    // Each slab is built down to the yard, not floated at its own height —
+    // a floating slab is a wall to walk into rather than a step to walk up.
+    // Deep slabs on a short pitch: consecutive tops have to overlap by more
+    // than the player's radius or the sweep meets the next slab's face
+    // instead of its top, and the climb stalls a third of the way up.
+    // It runs up the outside of the west block, not into its face: a ramp
+    // that ends against a wall is a wall.
+    for (let i = 0; i < 12; i++) {
+      const top = (DECK * i) / 11 + 0.18;
+      this.box('asphalt', 4.6, top, 1.7, -25.4, top / 2, 30.0 + i * 1.05,
+        { density: 0.9 });
+    }
+    // The turn onto the deck at the top.
+    this.box('asphalt', 8.0, 0.3, 3.4, -23.6, DECK - 0.15, 42.4, { density: 0.9 });
+
+    // ---- the streets themselves ----
+    // Bridges across the north-south street, so the deck is one piece again.
+    this.box('plate', 8.6, 0.30, 3.4, 2, DECK - 0.15, 52, { density: 0.7 });
+    this.box('plate', 8.6, 0.30, 3.4, 2, DECK - 0.15, 84, { density: 0.7 });
+    for (const bz of [52, 84]) {
+      for (const s of [-1, 1]) {
+        this.box('plate', 8.6, 1.05, 0.12, 2, DECK + 0.5, bz + s * 1.6,
+          { solid: false, density: 1.0 });
+      }
+    }
+
+    // Clutter down in the canyon, for cover and for scale.
+    drumCluster(this.batcher, { x: 1.2, z: 44, count: 5 });
+    this.collide(1.2, 0.45, 44, 2.2, 0.9, 2.2, 0, true);
+    drumCluster(this.batcher, { x: 3.4, z: 70, count: 4, mat: 'drumBlue' });
+    this.collide(3.4, 0.45, 70, 1.9, 0.9, 1.9, 0, true);
+    palletStack(this.batcher, { x: -0.6, z: 66, high: 4, ry: 0.2 });
+    this.collide(-0.6, 0.5, 66, 1.4, 1.0, 1.2, 0, true);
+    pipeRun(this.batcher, { x1: -2, z1: 36, x2: -2, z2: 88, y: 2.7, r: 0.20 });
+
+    // Rooflines joined up, so the high ground is a route and not four islands.
+    this.addCatwalk(-12, 48.5, -12, 65.5, DECK + 4.5, { width: 1.0 });
+    this.addCatwalk(-4.6, 46, 8.4, 46, DECK + 4.5, { width: 1.0 });
+
+    this.addSign(2, 3.1, 30, Math.PI, 'ښار', 'DOWNTOWN', DISTRICTS[2].color);
+    this.places.push({ x: 2, z: 60, ps: 'ښار', en: 'DOWNTOWN' });
+  }
+
   _connectors() {
     // Plant roof -> warehouse deck, over the north street.
     this.addCatwalk(-43, -58, 37, -62, 9.2, { width: 1.0 });
@@ -666,6 +838,14 @@ export class ArenaMap {
     ];
     for (const [x, z] of north) this.spawns[0].push(new THREE.Vector3(x, 0.6, z));
     for (const [x, z] of south) this.spawns[1].push(new THREE.Vector3(x, 0.6, z));
+
+    // Downtown drops you into the streets between the decks, not on top of
+    // them: the climb is meant to be earned.
+    const town = [[2, 34.5], [2, 90], [-26, 62], [30, 60]];
+    for (let i = 0; i < town.length; i++) {
+      const [x, z] = town[i];
+      this.spawns[i % 2].push(new THREE.Vector3(x, 0.6, z));
+    }
   }
 
   /** Picks a spawn far from the given threats. */
