@@ -68,16 +68,19 @@
     <!-- right thumb: look pad + action buttons -->
     <div class="stick stick-look" id="stick-look"><span class="stick-knob"></span></div>
 
+    <!-- Populated from the player's own layout at boot; these are the
+         defaults, and `data-action` is what the input layer binds to so a
+         duplicated or moved button behaves exactly like the original. -->
     <div class="action-cluster" id="actions">
-      <button class="btn btn-fire" id="btn-fire" aria-label="fire"><span class="ico-fire"></span></button>
-      <button class="btn" id="btn-reload" title="reload"><span class="ico-reload"></span></button>
-      <button class="btn" id="btn-swap" title="swap weapon"><span class="ico-swap"></span></button>
-      <button class="btn" id="btn-scope" title="scope"><span class="ico-scope"></span></button>
-      <button class="btn" id="btn-nade" title="grenade"><span class="ico-nade"></span><b id="nade-count">2</b></button>
-      <button class="btn" id="btn-jump" title="jump"><span class="ico-jump"></span></button>
-      <button class="btn" id="btn-crouch" title="crouch"><span class="ico-crouch"></span></button>
-      <button class="btn" id="btn-prone" title="prone"><span class="ico-prone"></span></button>
-      <button class="btn" id="btn-melee" title="melee"><span class="ico-melee"></span></button>
+      <button class="btn btn-fire" data-action="fire" aria-label="fire"><span class="ico-fire"></span></button>
+      <button class="btn" data-action="reload" title="reload"><span class="ico-reload"></span></button>
+      <button class="btn" data-action="swap" title="swap weapon"><span class="ico-swap"></span></button>
+      <button class="btn" data-action="scope" title="scope"><span class="ico-scope"></span></button>
+      <button class="btn" data-action="nade" title="grenade"><span class="ico-nade"></span><b id="nade-count">2</b></button>
+      <button class="btn" data-action="jump" title="jump"><span class="ico-jump"></span></button>
+      <button class="btn" data-action="crouch" title="crouch"><span class="ico-crouch"></span></button>
+      <button class="btn" data-action="prone" title="prone"><span class="ico-prone"></span></button>
+      <button class="btn" data-action="melee" title="melee"><span class="ico-melee"></span></button>
     </div>
 
     <!-- context prompt: ladder / ammo box -->

@@ -32,6 +32,27 @@ class Strings {
   String get settings => _('تنظیمات', 'Settings');
   String get characters => _('کرکټرونه', 'Characters');
   String get weapons => _('وسلې', 'Weapons');
+  String get buttonLayout => _('د بټنو ترتیب', 'Button layout');
+  String get buttonLayoutHint => _(
+      'بټن ونیسه او وې خوځوه. لاندې یې کچه بدله کړه، کاپي یې کړه یا یې حذف کړه.',
+      'Drag a button to move it. Resize, duplicate or remove it below.');
+  String get buttonSize => _('کچه', 'Size');
+  String get duplicate => _('کاپي', 'Duplicate');
+  String get removeButton => _('حذف', 'Remove');
+  String get moveStick => _('د حرکت سټک', 'Move stick');
+  String actionName(String id) {
+    switch (id) {
+      case 'fire': return _('فایر', 'Fire');
+      case 'reload': return _('ډکول', 'Reload');
+      case 'swap': return _('بدلول', 'Swap');
+      case 'scope': return _('نښه', 'Aim');
+      case 'nade': return _('بم', 'Grenade');
+      case 'jump': return _('ټوپ', 'Jump');
+      case 'crouch': return _('ټیټ', 'Crouch');
+      case 'prone': return _('پروت', 'Prone');
+      default: return _('چاړه', 'Melee');
+    }
+  }
   String get back => _('شاته', 'Back');
   String get next => _('بل', 'Next');
   String get save => _('خوندي کول', 'Save');
@@ -88,6 +109,9 @@ class Strings {
   String get tabControls => _('کنټرولونه', 'Controls');
   String get tabCharacter => _('کرکټر', 'Character');
   String get tabWeapons => _('وسلې', 'Weapons');
+  String get dragToTurn =>
+      _('په ګوته یې وګرځوه', 'Drag to turn it');
+  String get viewIn3d => _('۳D کتنه', 'View in 3D');
   String get perSecond => _('فایر/ثانیه', 'shots/s');
   String get perHit => _('فی ولګېدنه', 'per hit');
   String get toKillHead => _('سر:', 'Head:');

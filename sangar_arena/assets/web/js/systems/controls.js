@@ -239,17 +239,16 @@ export class TouchControls {
   }
 
   _bindButtons() {
-    const map = {
-      'btn-fire': 'fire', 'btn-reload': 'reload', 'btn-swap': 'swap',
-      'btn-scope': 'scope', 'btn-nade': 'nade', 'btn-jump': 'jump',
-      'btn-crouch': 'crouch', 'btn-prone': 'prone', 'btn-melee': 'melee',
-    };
     // Held buttons (fire) vs. tapped buttons (everything else).
     const held = new Set(['fire']);
 
-    for (const [id, name] of Object.entries(map)) {
-      const el = this.root.querySelector(`#${id}`);
-      if (!el) continue;
+    // Bound by `data-action` rather than by id, so a player who duplicates or
+    // moves a button in the layout editor gets one that behaves identically.
+    for (const el of this.root.querySelectorAll('#actions [data-action]')) {
+      if (el.dataset.bound === '1') continue;
+      el.dataset.bound = '1';
+      const name = el.dataset.action;
+      if (!(name in this.buttons)) continue;
       const down = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -283,6 +282,9 @@ export class TouchControls {
       el.addEventListener('contextmenu', (e) => e.preventDefault());
     }
   }
+
+  /** Re-scans the cluster after the layout has been rebuilt. */
+  rebindButtons() { this._bindButtons(); }
 
   /** Desktop/emulator support, handy for debugging the build on a laptop. */
   _bindKeyboard() {

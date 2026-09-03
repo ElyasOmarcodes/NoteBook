@@ -218,6 +218,14 @@ body.left-handed .action-cluster { right: auto; left: calc(12px * var(--hud)); a
 body.left-handed .hud-bottom-left { left: auto; right: 12px; align-items: flex-end; }
 
 /* ---------------- buttons ---------------- */
+/* A free layout: buttons are positioned by the player's own arrangement,
+   each one centred on its point so a percentage means the same thing on any
+   screen. Without `.free` the default grid below applies. */
+.action-cluster.free { position: absolute; inset: 0; display: block; }
+.action-cluster.free .btn {
+  position: absolute;
+  transform: translate(-50%, -50%) scale(var(--btn-scale, 1));
+}
 .action-cluster {
   position: absolute; right: calc(12px * var(--hud)); bottom: calc(14px * var(--hud));
   z-index: 3;

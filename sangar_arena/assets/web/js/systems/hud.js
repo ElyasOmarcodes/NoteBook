@@ -67,6 +67,48 @@ export class Hud {
     if (this.el.selfName) this.el.selfName.textContent = name;
   }
 
+  /**
+   * Rebuilds the action cluster from the player's own layout.
+   *
+   * Each entry is `{action, x, y, scale}` with x and y as fractions of the
+   * screen, so one layout works on any phone. When no layout is stored the
+   * markup's default grid is left exactly as it is.
+   *
+   * @param {Array<{action:string,x:number,y:number,scale:number}>} layout
+   */
+  setButtonLayout(layout) {
+    const host = this.root.getElementById('actions');
+    if (!host) return;
+    if (!Array.isArray(layout) || layout.length === 0) {
+      host.classList.remove('free');
+      return;
+    }
+    // Keep one of each kind of button around to clone, so the icon markup and
+    // the grenade counter do not have to be duplicated here.
+    if (!this._buttonTemplates) {
+      this._buttonTemplates = {};
+      for (const el of host.querySelectorAll('[data-action]')) {
+        this._buttonTemplates[el.dataset.action] = el.cloneNode(true);
+      }
+    }
+    host.classList.add('free');
+    host.textContent = '';
+    for (const item of layout) {
+      const tpl = this._buttonTemplates[item.action];
+      if (!tpl) continue;
+      const el = tpl.cloneNode(true);
+      el.dataset.bound = '';
+      // The grenade counter is looked up by id, so only the first copy may
+      // carry it; the rest lose the badge rather than fight over the id.
+      const badge = el.querySelector('#nade-count');
+      if (badge && host.querySelector('#nade-count')) badge.remove();
+      el.style.left = `${(item.x ?? 0.5) * 100}%`;
+      el.style.top = `${(item.y ?? 0.5) * 100}%`;
+      el.style.setProperty('--btn-scale', String(item.scale ?? 1));
+      host.appendChild(el);
+    }
+  }
+
   setHudScale(scale) {
     document.documentElement.style.setProperty('--hud', String(scale));
   }

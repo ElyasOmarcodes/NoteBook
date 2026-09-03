@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+
+import '../models/hud_layout.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/strings.dart';
@@ -50,6 +52,10 @@ class SettingsController extends ChangeNotifier {
   bool leftHanded = false;
   double hudScale = 1.0;
 
+  /// Where the on-screen action buttons sit, and how big they are. Editable
+  /// in settings; the engine positions its buttons straight from this.
+  List<HudButton> hudLayout = List.of(kDefaultHudLayout);
+
   // ---- loadout -----------------------------------------------------------
   String agentId = 'zmarai';
   String primaryId = 'ak_sangar';
@@ -84,6 +90,7 @@ class SettingsController extends ChangeNotifier {
         autoFire = (j['autoFire'] ?? autoFire) as bool;
         leftHanded = (j['leftHanded'] ?? leftHanded) as bool;
         hudScale = (j['hudScale'] as num?)?.toDouble() ?? hudScale;
+        hudLayout = hudLayoutFromJson(j['hudLayout']);
         agentId = (j['agentId'] ?? agentId) as String;
         primaryId = (j['primaryId'] ?? primaryId) as String;
         secondaryId = (j['secondaryId'] ?? secondaryId) as String;
@@ -124,6 +131,7 @@ class SettingsController extends ChangeNotifier {
         'autoFire': autoFire,
         'leftHanded': leftHanded,
         'hudScale': hudScale,
+        'hudLayout': hudLayoutToJson(hudLayout),
         'agentId': agentId,
         'primaryId': primaryId,
         'secondaryId': secondaryId,
@@ -147,6 +155,7 @@ class SettingsController extends ChangeNotifier {
         'autoFire': autoFire,
         'leftHanded': leftHanded,
         'hudScale': hudScale,
+        'hudLayout': hudLayoutToJson(hudLayout),
       };
 
   Future<void> save() async {
@@ -177,6 +186,7 @@ class SettingsController extends ChangeNotifier {
     autoFire = false;
     leftHanded = false;
     hudScale = 1.0;
+    hudLayout = List.of(kDefaultHudLayout);
     playerName = keptName;
     playerId = keptId;
     await save();

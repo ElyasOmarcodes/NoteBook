@@ -8,6 +8,7 @@ import '../../theme/app_theme.dart';
 import '../widgets/cards.dart';
 import '../widgets/common.dart';
 import '../widgets/preview_3d.dart';
+import 'hud_editor_screen.dart';
 
 /// Tabbed settings: general, audio, graphics, controls, character, weapons.
 class SettingsScreen extends StatefulWidget {
@@ -299,6 +300,28 @@ class _ControlsTab extends StatelessWidget {
     return ListView(
       padding: _pad,
       children: [
+        Panel(
+          title: s.buttonLayout.toUpperCase(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(s.buttonLayoutHint,
+                  style: const TextStyle(
+                      fontSize: 12, color: AppPalette.textLow)),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                      builder: (_) => const HudEditorScreen()),
+                ),
+                icon: const Icon(Icons.dashboard_customize, size: 18),
+                label: Text(s.buttonLayout),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+
         Panel(
           title: s.tabControls.toUpperCase(),
           child: Column(

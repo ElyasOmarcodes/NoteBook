@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/strings.dart';
+import '../screens/preview_screen.dart';
 import '../../models/catalog.dart';
 import '../../theme/app_theme.dart';
 import 'common.dart';
@@ -42,8 +43,20 @@ class AgentCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: Center(
-                child: AgentPortrait(agent: agent, size: 92),
+              child: Stack(
+                children: [
+                  Center(child: AgentPortrait(agent: agent, size: 92)),
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: _Preview3DButton(
+                      kind: 'character',
+                      id: agent.model,
+                      title: s.isPashto ? agent.namePs : agent.nameEn,
+                      subtitle: s.isPashto ? agent.bioPs : agent.bioEn,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 8),
@@ -130,9 +143,25 @@ class WeaponCard extends StatelessWidget {
               style: const TextStyle(fontSize: 11, color: AppPalette.textLow),
             ),
             const SizedBox(height: 8),
-            SizedBox(
-              height: 46,
-              child: WeaponSilhouette(kind: weapon.kind),
+            // A still of the shape, and a way through to the real model.
+            Stack(
+              children: [
+                SizedBox(
+                  height: 46,
+                  width: double.infinity,
+                  child: WeaponSilhouette(kind: weapon.kind),
+                ),
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: _Preview3DButton(
+                    kind: 'weapon',
+                    id: weapon.id,
+                    title: s.isPashto ? weapon.namePs : weapon.nameEn,
+                    subtitle: _kindLabel(weapon.kind, s),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 6),
             // Damage and rate of fire are stated as real numbers below, so
@@ -281,4 +310,56 @@ class _WeaponPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_WeaponPainter oldDelegate) => oldDelegate.kind != kind;
+}
+
+
+/// The little "look at it properly" affordance on a card.
+///
+/// A card cannot carry a live 3D view — a list of eight of them would be eight
+/// WebViews — so the card shows a still and this opens the real model full
+/// screen, where it can be turned by hand.
+class _Preview3DButton extends StatelessWidget {
+  const _Preview3DButton({
+    required this.kind,
+    required this.id,
+    required this.title,
+    this.subtitle,
+  });
+
+  final String kind;
+  final String id;
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    return Material(
+      color: AppPalette.surfaceHigh.withValues(alpha: 0.92),
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => PreviewScreen(
+                kind: kind, id: id, title: title, subtitle: subtitle),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.threed_rotation, size: 14,
+                  color: AppPalette.accent),
+              const SizedBox(width: 4),
+              Text(s.viewIn3d,
+                  style: const TextStyle(
+                      fontSize: 10, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

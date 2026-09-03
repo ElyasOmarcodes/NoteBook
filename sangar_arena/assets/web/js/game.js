@@ -128,6 +128,7 @@ export class Game {
     this.hud = new Hud(document, STRINGS[this.settings.lang] ?? STRINGS.ps);
     this.hud.setHudScale(this.settings.hudScale);
     this.hud.setFpsVisible(this.settings.showFps);
+    this.hud.setButtonLayout(this.settings.hudLayout);
     this.controls = new TouchControls(document, this.settings);
     this.controls.setLeftHanded(this.settings.leftHanded);
 
@@ -729,6 +730,11 @@ export class Game {
     Object.assign(this.settings, next);
     this.audio.applySettings(this.settings);
     this.hud.setHudScale(this.settings.hudScale ?? 1);
+    if ('hudLayout' in next) {
+      this.hud.setButtonLayout(this.settings.hudLayout);
+      // The cluster was rebuilt, so the new nodes need their listeners.
+      this.controls.rebindButtons();
+    }
     this.hud.setFpsVisible(!!this.settings.showFps);
     this.hud.setStrings(STRINGS[this.settings.lang] ?? STRINGS.ps);
     this.controls.setLeftHanded(!!this.settings.leftHanded);

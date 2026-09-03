@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sangar_arena/models/hud_layout.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sangar_arena/l10n/strings.dart';
 import 'package:sangar_arena/models/catalog.dart';
@@ -25,6 +26,7 @@ Widget host(Widget child, {AppLang lang = AppLang.ps}) {
 }
 
 void main() {
+  _hudLayoutTests();
   testWidgets('agent cards render for every agent in both languages',
       (tester) async {
     tester.view.physicalSize = const Size(1600, 900);
@@ -104,5 +106,28 @@ void main() {
     ));
     await tester.pump();
     expect(tester.takeException(), isNull);
+  });
+}
+
+void _hudLayoutTests() {
+  test('the default button layout keeps every button on screen', () {
+    for (final b in kDefaultHudLayout) {
+      expect(b.x, inInclusiveRange(0.0, 1.0), reason: b.action);
+      expect(b.y, inInclusiveRange(0.0, 1.0), reason: b.action);
+      expect(b.scale, inInclusiveRange(0.5, 2.0), reason: b.action);
+      expect(kHudActions, contains(b.action));
+    }
+  });
+
+  test('a layout survives a round trip through JSON', () {
+    final back = hudLayoutFromJson(hudLayoutToJson(kDefaultHudLayout));
+    expect(back.length, kDefaultHudLayout.length);
+    expect(back.first.action, kDefaultHudLayout.first.action);
+    expect(back.first.x, closeTo(kDefaultHudLayout.first.x, 1e-9));
+  });
+
+  test('a broken or missing layout falls back to the default', () {
+    expect(hudLayoutFromJson(null).length, kDefaultHudLayout.length);
+    expect(hudLayoutFromJson(<Object>[]).length, kDefaultHudLayout.length);
   });
 }
