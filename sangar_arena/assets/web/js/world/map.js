@@ -58,16 +58,11 @@ export class ArenaMap {
 
   build() {
     this._ground();
-    this._roads();
+    this._planRoads();
     this._perimeter();
 
-    this._plantBlocks();
-    this._warehouseRow();
-    this._tankFarm();
-    this._containerYard();
-    this._chowk();
-    this._downtown();
-    this._frontage();
+    // Everything inside the wall is laid out from the plan.
+    this._plan();
 
     this._connectors();
     this._clutter();
@@ -294,56 +289,259 @@ export class ArenaMap {
   }
 
   /**
-   * The yard's road: an asphalt loop with a kerbed edge, laid as a strip of
-   * quads so it can bend around the plant the way the reference road does.
+   * The roads, traced from the plan.
+   *
+   * The drawing marks them in highlighter: an inner rectangle around the
+   * middle of the compound, a long street down the east side, and spurs west
+   * and south. Every run is a strip of asphalt with a kerb down both sides.
    */
-  _roads() {
-    const path = [
-      [-86, -86], [-20, -86], [40, -78], [82, -52], [86, 8],
-      [70, 62], [10, 86], [-52, 84], [-86, 40], [-90, -30], [-86, -86],
+  _planRoads() {
+    const RUNS = [
+      // the inner rectangle
+      [-44, -40, -44, 47], [-44, -40, 1, -40], [1, -40, 1, 43], [-44, 47, 1, 47],
+      // the east street and the road along the south of the compound
+      [64, -89, 64, 43], [1, 43, 98, 43],
+      // the western spurs
+      [-100, 47, -44, 47], [-98, 47, -98, 90],
+      // the northern link, which the plan runs between the two APR rows
+      [-44, -76, 64, -76],
     ];
-    const width = 13;
-    const asphalt = [];
-    for (let i = 0; i < path.length - 1; i++) {
-      const [x1, z1] = path[i];
-      const [x2, z2] = path[i + 1];
+    const WIDTH = 12;
+    for (const [x1, z1, x2, z2] of RUNS) {
       const dx = x2 - x1, dz = z2 - z1;
       const len = Math.hypot(dx, dz);
       const angle = Math.atan2(dx, dz);
-      const g = new THREE.PlaneGeometry(width, len + 1.5);
+      const g = new THREE.PlaneGeometry(WIDTH, len + 1.5);
       g.rotateX(-Math.PI / 2);
-      scaleUV(g, width * 0.22, (len + 1.5) * 0.22);
+      scaleUV(g, WIDTH * 0.22, (len + 1.5) * 0.22);
       place(this.batcher, 'asphalt', g, {
         x: (x1 + x2) / 2, y: 0.015, z: (z1 + z2) / 2, ry: angle,
       });
       g.dispose();
-      asphalt.push({ x1, z1, x2, z2, angle });
-    }
-
-    // Kerbs down both sides, stepped up off the asphalt.
-    for (const seg of asphalt) {
-      const nx = Math.cos(seg.angle) * (width / 2 + 0.2);
-      const nz = -Math.sin(seg.angle) * (width / 2 + 0.2);
-      for (const s of [1, -1]) {
+      const nx = Math.cos(angle) * (WIDTH / 2 + 0.2);
+      const nz = -Math.sin(angle) * (WIDTH / 2 + 0.2);
+      for (const side of [1, -1]) {
         kerb(this.batcher, {
-          x1: seg.x1 + nx * s, z1: seg.z1 + nz * s,
-          x2: seg.x2 + nx * s, z2: seg.z2 + nz * s,
+          x1: x1 + nx * side, z1: z1 + nz * side,
+          x2: x2 + nx * side, z2: z2 + nz * side,
         });
       }
     }
+  }
 
-    // A cross street through the middle of the plant.
-    for (const [ax, az, bx, bz] of [[-70, 0, 70, 0], [0, -70, 0, 70]]) {
-      const dx = bx - ax, dz = bz - az;
-      const len = Math.hypot(dx, dz);
-      const g = new THREE.PlaneGeometry(11, len);
-      g.rotateX(-Math.PI / 2);
-      scaleUV(g, 11 * 0.22, len * 0.22);
-      place(this.batcher, 'asphalt', g, {
-        x: (ax + bx) / 2, y: 0.012, z: (az + bz) / 2,
-        ry: Math.atan2(dx, dz),
-      });
-      g.dispose();
+  /**
+   * The compound, laid out from the hand-drawn plan.
+   *
+   * The plan names each block and its storeys — APR for a flat roof, Room for
+   * a pitched iron one — marks the red-painted ones, marks where a wall has a
+   * doorway through it, and marks the few places worth putting a stair. This
+   * follows it block by block; where the drawing is ambiguous the reference
+   * photographs decide.
+   */
+  _plan() {
+    const RED = 'sidingRed';
+    const WHT = 'sidingWhite';
+    const GRY = 'sidingGrey';
+
+    // ---- north edge -----------------------------------------------------
+    // "ARP X3" with the red mark, then "APR X3", then the north-east corner.
+    this.apartment({ x: -31, z: -92, w: 56, d: 12, storeys: 3, mat: RED, door: 'south' });
+    this.apartment({ x: 37, z: -91, w: 38, d: 12, storeys: 3, mat: WHT, door: 'south' });
+    this.apartment({ x: 78, z: -63, w: 20, d: 40, storeys: 3, mat: WHT, door: 'west', ladder: true });
+
+    // Water storage and containers along the north yard.
+    for (const [wx, wz, r, h] of [[-76, -74, 7.5, 11], [-29, -76, 6.5, 9.5], [-14, -77, 6.0, 9]]) {
+      this._waterStore(wx, wz, r, h);
+    }
+    this._containerPair(-49, -70, 0);
+    this._containerPair(-41, -62, 0);
+
+    // ---- west edge ------------------------------------------------------
+    // Two long APR x3 runs, the outer one against the wall.
+    this.apartment({ x: -88, z: -6, w: 14, d: 88, storeys: 3, mat: WHT, door: 'east' });
+    this.apartment({ x: -59, z: -14, w: 16, d: 72, storeys: 3, mat: GRY, door: 'east' });
+    // The plan marks a stair between them. Three flights that actually reach
+    // the inner block's roof: a stair that stops short of its target is a
+    // decoration, and the last build had three of those.
+    this.stairTower(-72, 0, -40, 0, 3,
+      { steps: 10, width: 1.9, rise: 0.36, run: 0.42, mat: 'concrete', landing: 2.2 });
+    // The bridge from the stair head onto the roof. It begins exactly where
+    // the last step ends: a slab that overlaps the top of a flight is a
+    // ceiling to walk into, and it stops the climb two steps short.
+    this.box('plate', 7.0, 0.26, 3.2, -70.5, 10.80, -21.4, { density: 0.8 });
+
+    // The pipe yard the plan draws as a heap of cylinders, and its crate.
+    this._pipeYard(-28, -18);
+    this.box('wood', 2.4, 2.0, 2.0, -35, 1.0, -5, { density: 1.0 });
+
+    // ---- east side ------------------------------------------------------
+    this.room({ x: 7, z: -70, w: 13, d: 26, storeys: 1, mat: RED, roof: 'roofRed', door: 'west' });
+    this.room({ x: 49, z: -62, w: 16, d: 36, storeys: 3, mat: RED, roof: 'roofRed', door: 'west', ladder: true });
+    // The middle cluster: 3x, a half-depth 0.5x in red, and a 1x.
+    this.room({ x: 24, z: -30, w: 15, d: 26, storeys: 3, mat: WHT, roof: 'roof', door: 'west' });
+    this.room({ x: 38, z: -26, w: 10, d: 13, storeys: 1, mat: RED, roof: 'roofRed', door: 'west' });
+    this.room({ x: 22, z: -8, w: 13, d: 12, storeys: 1, mat: WHT, roof: 'roof', door: 'north' });
+    this._containerPair(47, 10, 0);
+    this._containerPair(57, 21, 0);
+    // "Bed Room x1", red, hard against the east road.
+    this.room({ x: 83, z: 7, w: 16, d: 30, storeys: 1, mat: RED, roof: 'roofRed', door: 'west' });
+    this.box('plate', 3.0, 3.0, 0.2, 90, 1.5, -22, { solid: false, density: 0.8 });
+    // The plan runs a grille fence the length of the east street.
+    this._grilleRun(72, -34, 72, 34);
+    this.stairTower(62, 0, -14, Math.PI, 2,
+      { steps: 6, width: 1.8, rise: 0.34, run: 0.42, mat: 'concrete', landing: 2.2 });
+
+    // ---- south edge -----------------------------------------------------
+    this.room({ x: -55, z: 80, w: 15, d: 36, storeys: 3, mat: WHT, roof: 'roof', door: 'east' });
+    this.room({ x: -88, z: 92, w: 20, d: 14, storeys: 3, mat: WHT, roof: 'roofRed', door: 'north' });
+    this.room({ x: -75, z: 58, w: 12, d: 10, storeys: 1, mat: RED, roof: 'roofRed', door: 'east' });
+    this.apartment({ x: -9, z: 80, w: 18, d: 40, storeys: 3, mat: GRY, door: 'east' });
+    this.apartment({ x: 86, z: 76, w: 20, d: 38, storeys: 3, mat: RED, door: 'west', ladder: true });
+    for (const [wx, wz, r, h] of [[29, 75, 7.0, 10], [43, 75, 7.0, 10]]) {
+      this._waterStore(wx, wz, r, h);
+    }
+
+    // ---- the middle -----------------------------------------------------
+    // "ARP X1" and "Room x2", the two blocks the plan puts in the centre.
+    this.apartment({ x: -11, z: 16, w: 16, d: 16, storeys: 1, mat: WHT, door: 'north' });
+    this.room({ x: -26, z: 40, w: 22, d: 22, storeys: 2, mat: RED, roof: 'roofRed', door: 'east' });
+    this._containerPair(-44, 30, Math.PI / 2);
+    // The green hatched strip: a grille wall splitting the middle.
+    this._grilleRun(-8, -30, -8, 8);
+    // Stairs the plan marks around the centre blocks.
+    // Eleven steps that land exactly on the roof lip, not against the wall.
+    this.addStairs(-11, 0, 29.0, Math.PI, 11,
+      { width: 2.6, rise: 0.34, run: 0.42, mat: 'concrete' });
+    this.addStairs(-3.5, 0, 29.0, Math.PI, 11,
+      { width: 2.0, rise: 0.34, run: 0.42, mat: 'concrete' });
+
+    // ---- the walls between the blocks, and the doors through them --------
+    // Every run the plan draws in ink, with a way through wherever it puts an
+    // orange mark.
+    const WALLS = [
+      // north yard, between the APR row and the water stores
+      [-62, -80, -20, -80, [0.30, 0.72]],
+      [-6, -80, 24, -80, [0.5]],
+      // the west compound
+      [-80, -50, -68, -50, [0.5]],
+      [-80, 40, -68, 40, [0.4]],
+      // around the middle
+      [-44, -4, -20, -4, [0.35, 0.8]],
+      [-2, 4, 14, 4, [0.5]],
+      [-44, 56, -18, 56, [0.45]],
+      // the east yard
+      [34, 2, 40, 2, [0.5]],
+      [40, -46, 40, -14, [0.55]],
+      // the south yard
+      [4, 60, 22, 60, [0.5]],
+      [52, 58, 74, 58, [0.4, 0.85]],
+    ];
+    for (const [x1, z1, x2, z2, gaps] of WALLS) {
+      this._wallRun(x1, z1, x2, z2, { gaps });
+    }
+
+    this.places.push({ x: -31, z: -92, ps: DISTRICTS[0].ps, en: DISTRICTS[0].en });
+    this.places.push({ x: 78, z: -63, ps: DISTRICTS[1].ps, en: DISTRICTS[1].en });
+    this.places.push({ x: -59, z: -14, ps: DISTRICTS[2].ps, en: DISTRICTS[2].en });
+    this.places.push({ x: 86, z: 76, ps: DISTRICTS[3].ps, en: DISTRICTS[3].en });
+    this.places.push({ x: -11, z: 16, ps: 'مرکز', en: 'CENTRE' });
+  }
+
+  /** A "WS" from the plan: a squat water tank with a lid you can stand on. */
+  _waterStore(x, z, r, h) {
+    oilTank(this.batcher, this.extras, { x, z, r, h });
+    this.cylinder(x, z, r, 0, h);
+    const lid = aabb(x, h + 0.3, z, (r + 0.12) * 2, 0.6, (r + 0.12) * 2);
+    lid.walkable = true;
+    lid.round = { x, z, r: r + 0.12 };
+    this.solids.push(lid);
+    this.addLadder(x + r - 0.1, z, 0, h + 0.7, -Math.PI / 2, { wood: false });
+  }
+
+  /** A "con x2" from the plan: two containers, one on the other. */
+  _containerPair(x, z, ry) {
+    const cos = Math.abs(Math.cos(ry)), sin = Math.abs(Math.sin(ry));
+    const mats = ['containerBlue', 'containerRust'];
+    for (let i = 0; i < 2; i++) {
+      container(this.batcher, { x, y: i * 2.62, z, ry, mat: mats[i] });
+      this.collide(x, i * 2.62 + 1.3, z,
+        12.2 * cos + 2.44 * sin, 2.59, 12.2 * sin + 2.44 * cos, 0, true);
+    }
+  }
+
+  /** The heap of pipes the plan draws, stacked so it can be climbed. */
+  _pipeYard(x, z) {
+    for (let row = 0; row < 3; row++) {
+      const n = 3 - row;
+      for (let i = 0; i < n; i++) {
+        const px = x + (i - (n - 1) / 2) * 2.6 + row * 0.2;
+        const py = 1.1 + row * 2.1;
+        pipeRun(this.batcher, { x1: px, z1: z - 6, x2: px, z2: z + 6, y: py, r: 1.1 });
+        this.collide(px, py, z, 2.4, 2.2, 12, 0, true);
+      }
+    }
+  }
+
+  /**
+   * A run of wall with a doorway in it.
+   *
+   * The plan marks these in orange: every place a wall or a fence has a way
+   * through. A compound whose walls are unbroken is a maze of dead ends, and
+   * the orange marks are what keep it a place you can move around in.
+   */
+  _wallRun(x1, z1, x2, z2, { gaps = [0.5], h = 3.4, mat = 'wall' } = {}) {
+    const dx = x2 - x1, dz = z2 - z1;
+    const len = Math.hypot(dx, dz);
+    const ry = Math.atan2(dx, dz);
+    const DOOR = 2.8;
+    // Turn the gap centres into the solid pieces between them.
+    const cuts = [...gaps].sort((a, b) => a - b);
+    let at = 0;
+    const pieces = [];
+    for (const g of cuts) {
+      const start = Math.max(0, g * len - DOOR / 2);
+      if (start > at + 0.4) pieces.push([at, start]);
+      at = Math.min(len, g * len + DOOR / 2);
+    }
+    if (at < len - 0.4) pieces.push([at, len]);
+
+    for (const [a, b] of pieces) {
+      const t = (a + b) / 2 / len;
+      this.box(mat, 0.5, h, b - a, x1 + dx * t, h / 2, z1 + dz * t,
+        { ry, density: 0.3 });
+    }
+    // A lintel over each doorway, so it reads as a door rather than a gap.
+    for (const g of cuts) {
+      const above = h - 2.3;
+      if (above < 0.2) continue;
+      this.box(mat, 0.5, above, DOOR, x1 + dx * g, 2.3 + above / 2, z1 + dz * g,
+        { ry, density: 0.3 });
+    }
+    // Cap rail along the whole run.
+    this.box('kerb', 0.8, 0.28, len, (x1 + x2) / 2, h + 0.14, (z1 + z2) / 2,
+      { ry, density: 0.9 });
+  }
+
+  /** A run of expanded-metal grille, which the plan marks in green. */
+  _grilleRun(x1, z1, x2, z2) {
+    const dx = x2 - x1, dz = z2 - z1;
+    const len = Math.hypot(dx, dz);
+    const ry = Math.atan2(dx, dz);
+    // Panels with posts, and a gap in the middle: the plan puts a way through.
+    const gap = 3.2;
+    for (const side of [-1, 1]) {
+      const seg = (len - gap) / 2;
+      const t = side * (gap / 2 + seg / 2) / len;
+      // Density 2.0 puts the diamond at about 6 cm, which is what chain-link
+      // actually measures; at the old 0.5 each one was a quarter-metre wide.
+      this.box('mesh', 0.10, 3.0, seg,
+        (x1 + x2) / 2 + dx * t, 1.5, (z1 + z2) / 2 + dz * t,
+        { ry, density: 2.0 });
+    }
+    for (let i = 0; i <= 4; i++) {
+      const t = i / 4;
+      this.box('plate', 0.34, 3.3, 0.34, x1 + dx * t, 1.65, z1 + dz * t,
+        { solid: false, density: 1.2 });
     }
   }
 
@@ -625,126 +823,6 @@ export class ArenaMap {
   // districts
   // =======================================================================
 
-  /** North-west: the plant blocks with their skylight rows. */
-  _plantBlocks() {
-    this.plantBlock({ x: -58, z: -58, w: 30, d: 18, h: 9.5, skylights: 3, ladderSide: 1 });
-    this.plantBlock({ x: -58, z: -30, w: 24, d: 14, h: 7.0, skylights: 2, ladderSide: -1 });
-    this.plantBlock({ x: -22, z: -62, w: 20, d: 16, h: 11.5, skylights: 2, ladderSide: -1 });
-    smokestack(this.batcher, { x: -8, z: -74, h: 27, r: 1.15 });
-    this.cylinder(-8, -74, 1.15, 0, 27);
-    smokestack(this.batcher, { x: -3, z: -74, h: 24, r: 1.0 });
-    this.cylinder(-3, -74, 1.0, 0, 24);
-
-    this.officeHut({ x: -36, z: -34 });
-    this.places.push({ x: -52, z: -50, ps: DISTRICTS[0].ps, en: DISTRICTS[0].en });
-  }
-
-  /** North-east: the warehouse row. */
-  _warehouseRow() {
-    this.warehouse({ x: 54, z: -62, w: 34, d: 16, h: 7.4, wall: 'sidingRed', roof: 'roofRed', doorEnd: -1 });
-    this.warehouse({ x: 54, z: -36, w: 34, d: 16, h: 7.4, wall: 'sidingGrey', roof: 'roof', doorEnd: 1 });
-    this.warehouse({ x: 24, z: -30, w: 16, d: 26, h: 6.4, wall: 'sidingBlue', roof: 'roofBlue', doorEnd: 1 });
-
-    // Wooden stair up to the northern warehouse deck, with a landing.
-    this.addStairs(30, 0, -70, 0, 22, { width: 2.2 });
-    this.box('wood', 3.2, 0.16, 3.2, 30, 7.5, -61.5, { density: 0.9 });
-
-
-    this.places.push({ x: 54, z: -48, ps: DISTRICTS[1].ps, en: DISTRICTS[1].en });
-  }
-
-  /** South-west: the tank farm. */
-  _tankFarm() {
-    const tanks = [
-      { x: -64, z: 34, r: 9.0, h: 12.5 },
-      { x: -40, z: 30, r: 9.0, h: 12.5 },
-      { x: -62, z: 60, r: 10.5, h: 15.0 },
-      { x: -34, z: 58, r: 7.5, h: 10.5 },
-    ];
-    for (const t of tanks) {
-      oilTank(this.batcher, this.extras, t);
-      this.cylinder(t.x, t.z, t.r, 0, t.h);
-      const lid = aabb(t.x, t.h + 0.3, t.z, (t.r + 0.12) * 2, 0.6, (t.r + 0.12) * 2);
-      lid.walkable = true;
-      lid.round = { x: t.x, z: t.z, r: t.r + 0.12 };
-      this.solids.push(lid);
-    }
-    // Service ladder up the biggest tank.
-    const big = tanks[2];
-    this.addLadder(big.x, big.z + big.r + 0.12, 0, big.h + 0.6, 0, { wood: false });
-
-    // Trestle pipe runs, low enough to duck under and high enough to shelter.
-    pipeRun(this.batcher, { x1: -74, z1: 20, x2: -20, z2: 20, y: 4.2, r: 0.48 });
-    pipeRun(this.batcher, { x1: -74, z1: 23, x2: -20, z2: 23, y: 3.4, r: 0.34 });
-    this.collide(-47, 4.2, 20, 54, 0.5, 1.2, 0, true);
-
-    // A high pipe joining two tank lids: the quiet flank route.
-    pipeRun(this.batcher, {
-      x1: tanks[0].x, z1: tanks[0].z, x2: tanks[2].x, z2: tanks[2].z,
-      y: 12.8, r: 0.55, supports: false,
-    });
-    this.collide((tanks[0].x + tanks[2].x) / 2, 13.1, (tanks[0].z + tanks[2].z) / 2,
-      1.4, 0.4, Math.abs(tanks[2].z - tanks[0].z) + 2, 0, true);
-
-    this.places.push({ x: -52, z: 44, ps: DISTRICTS[2].ps, en: DISTRICTS[2].en });
-  }
-
-  /** South-east: the container yard. */
-  _containerYard() {
-    const mats = ['containerBlue', 'containerRust', 'containerGreen'];
-    const layout = [
-      [34, 30, 0, 2], [34, 34, 0, 1], [50, 26, Math.PI / 2, 2],
-      [62, 40, 0, 3], [40, 52, Math.PI / 2, 1], [58, 62, 0, 2],
-      [30, 66, 0, 1], [74, 30, Math.PI / 2, 2], [72, 68, 0, 1],
-    ];
-    let n = 0;
-    for (const [cx, cz, ry, stack] of layout) {
-      for (let s = 0; s < stack; s++) {
-        const y = s * 2.62;
-        container(this.batcher, {
-          x: cx, y, z: cz, ry, mat: mats[n % 3],
-        });
-        const cos = Math.abs(Math.cos(ry)), sin = Math.abs(Math.sin(ry));
-        this.collide(cx, y + 1.3, cz,
-          12.2 * cos + 2.44 * sin, 2.59, 12.2 * sin + 2.44 * cos, 0, true);
-        n++;
-      }
-    }
-    // The step-up route: crates rising a uniform 0.42 m onto the stacks.
-    this._crateSteps(22, 30, 0);
-    this.addLadder(62, 46.5, 0, 8.0, Math.PI, { wood: false });
-    this.addCatwalk(62, 44, 58, 34, 7.95, { width: 0.95 });
-
-    this.places.push({ x: 52, z: 46, ps: DISTRICTS[3].ps, en: DISTRICTS[3].en });
-  }
-
-  /** The chowk itself: the open crossing at the centre of the plant. */
-  _chowk() {
-    // Watchtower over the crossroads.
-    const tx = 0, tz = 0, th = 11;
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      this.box('plate', 0.38, th, 0.38,
-        tx + Math.cos(a) * 2.5, th / 2, tz + Math.sin(a) * 2.5, { density: 1.0 });
-    }
-    this.box('plate', 6.6, 0.3, 6.6, tx, th + 0.15, tz, { density: 0.6 });
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2;
-      this.box('plate', 6.6, 1.15, 0.14,
-        tx + Math.sin(a) * 3.2, th + 0.9, tz + Math.cos(a) * 3.2,
-        { ry: a, solid: false, density: 1.0 });
-    }
-    this.box('roofBlue', 7.4, 0.18, 7.4, tx, th + 2.3, tz, { solid: false, density: 0.5 });
-    this.addLadder(tx + 3.0, tz, 0, th + 0.5, -Math.PI / 2, { wood: false });
-    this.places.push({ x: 0, z: 0, ps: 'مرکزي برج', en: 'TOWER' });
-
-    // Fenced compound around the crossing.
-    chainFence(this.batcher, this.extras, { x1: -16, z1: -13, x2: 16, z2: -13, mesh: this.fenceMat });
-    this.collide(0, 1.2, -13, 32, 2.4, 0.4, 0, false);
-    chainFence(this.batcher, this.extras, { x1: -16, z1: 13, x2: 16, z2: 13, mesh: this.fenceMat });
-    this.collide(0, 1.2, 13, 32, 2.4, 0.4, 0, false);
-  }
-
   /**
    * The step-up route onto the container stacks.
    *
@@ -770,222 +848,6 @@ export class ArenaMap {
   }
 
   /**
-   * The south quarter: the part of the yard with real height in it.
-   *
-   * Everything else on this map is a shed on flat ground. Here the ground
-   * itself does the work — a raised concrete terrace split by two streets that
-   * run at the old grade, so walking along them is walking at the bottom of a
-   * 3.6 m canyon with the deck above on both sides. What stands on the deck is
-   * deliberately uneven: a single-storey block you can only reach by catwalk,
-   * a two-storey with an outside stair, a three-storey with a stairwell, and a
-   * shed with nothing at all. Fighting through it means choosing a level.
-   */
-  _downtown() {
-    const DECK = 3.6;                 // terrace height above the yard
-    const blocks = [
-      { x: -12, z: 46, w: 20, d: 21 },
-      { x: -12, z: 76, w: 20, d: 25 },
-      { x: 16, z: 46, w: 20, d: 21 },
-      { x: 16, z: 76, w: 20, d: 25 },
-    ];
-    for (const b of blocks) {
-      this.box('concrete', b.w, DECK, b.d, b.x, DECK / 2, b.z, { density: 0.34 });
-      // A kerb around the lip, so the edge reads before you walk off it.
-      for (const [dx, dz, kw, kd] of [
-        [0, -b.d / 2, b.w, 0.3], [0, b.d / 2, b.w, 0.3],
-        [-b.w / 2, 0, 0.3, b.d], [b.w / 2, 0, 0.3, b.d],
-      ]) {
-        this.box('kerb', kw, 0.26, kd, b.x + dx, DECK + 0.13, b.z + dz,
-          { density: 1.1 });
-      }
-    }
-
-    // ---- what stands on the deck ----
-
-    // Single storey, flat roof, no way up from the deck: the catwalk only.
-    this.box('block', 13, 4.2, 12, -12, DECK + 2.1, 42, { density: 0.4 });
-    this.box('roof', 13.6, 0.3, 12.6, -12, DECK + 4.35, 42, { density: 0.5 });
-
-    // Two storeys with an outside stair and a landing at the first floor.
-    this.box('sidingGrey', 14, 8.4, 15, -12, DECK + 4.2, 78, { density: 0.42 });
-    this.box('roofRed', 14.6, 0.32, 15.6, -12, DECK + 8.56, 78, { density: 0.5 });
-    for (let f = 0; f < 2; f++) {
-      const y = DECK + 3.0 + f * 3.9;
-      for (const zz of [73.5, 78, 82.5]) {
-        this.box('plate', 0.12, 1.5, 2.4, -19.05, y, zz,
-          { solid: false, density: 1.0 });
-      }
-    }
-    // Two flights up the east face, with a half-landing, onto the first floor
-    // gallery and then the roof.
-    this.stairTower(-3.4, DECK, 88.0, Math.PI, 2,
-      { steps: 6, width: 1.7, rise: 0.34, run: 0.42, mat: 'concrete',
-        landing: 2.2 });
-    // The gallery has to begin where the stairs end, not overhang them: a slab
-    // at head height above the second flight is a ceiling to walk into.
-    this.box('plate', 3.2, 0.24, 6.0, -3.4, DECK + 4.05, 77.4, { density: 0.8 });
-    this.addLadder(-4.4, 76.0, DECK + 4.2, DECK + 8.8, -Math.PI / 2, { wood: false });
-
-    // Three storeys with a proper stairwell running up the outside.
-    this.box('block', 15, 12.6, 14, 16, DECK + 6.3, 46, { density: 0.42 });
-    this.box('roof', 15.6, 0.34, 14.6, 16, DECK + 12.77, 46, { density: 0.5 });
-    // Three flights climbing the block's east face, landing by landing.
-    this.stairTower(25.2, DECK, 37.0, 0, 3,
-      { steps: 8, width: 1.7, rise: 0.36, run: 0.42, mat: 'concrete',
-        landing: 2.2 });
-    // A gallery off the top of the stairs and a ladder onto the roof.
-    this.box('plate', 3.4, 0.26, 6.0, 25.2, DECK + 8.5, 52.5, { density: 0.8 });
-    this.addLadder(24.2, 53.5, DECK + 8.7, DECK + 12.95, -Math.PI / 2, { wood: false });
-    this.box('plate', 8.0, 0.26, 3.0, 20.0, DECK + 12.8, 52.8, { density: 0.8 });
-
-    // A storage shed: low, cluttered, and a dead end if you climb it.
-    this.box('sidingBlue', 11, 3.2, 9, 16, DECK + 1.6, 78, { density: 0.45 });
-    this.box('roofBlue', 11.6, 0.28, 9.6, 16, DECK + 3.34, 78, { density: 0.5 });
-    this.addLadder(16, 73.0, DECK, DECK + 3.7, 0, { wood: false });
-
-    // ---- getting up from the streets ----
-
-    // South end of the north-south street: one long flight.
-    this.addStairs(2, 0, 33.5, 0, 11,
-      { width: 3.0, rise: 0.34, run: 0.42, mat: 'concrete' });
-    this.box('concrete', 4.0, 0.3, 3.0, 2, DECK - 0.15, 39.5, { density: 0.8 });
-
-    // The cross street: a switchback climbing the north deck's flank, laid
-    // along the street so neither flight runs into a block.
-    this.stairTower(-6.5, 0, 60.0, -Math.PI / 2, 2,
-      { steps: 6, width: 1.85, rise: 0.34, run: 0.44, mat: 'concrete',
-        landing: 2.2 });
-
-    // South-west corner: a vehicle ramp rather than steps, wide enough to
-    // fight over, running up onto the deck clear of the container yard.
-    // Each slab is built down to the yard, not floated at its own height —
-    // a floating slab is a wall to walk into rather than a step to walk up.
-    // Deep slabs on a short pitch: consecutive tops have to overlap by more
-    // than the player's radius or the sweep meets the next slab's face
-    // instead of its top, and the climb stalls a third of the way up.
-    // It runs up the outside of the west block, not into its face: a ramp
-    // that ends against a wall is a wall.
-    for (let i = 0; i < 12; i++) {
-      const top = (DECK * i) / 11 + 0.18;
-      this.box('asphalt', 4.6, top, 1.7, -25.4, top / 2, 30.0 + i * 1.05,
-        { density: 0.9 });
-    }
-    // The turn onto the deck at the top.
-    this.box('asphalt', 8.0, 0.3, 3.4, -23.6, DECK - 0.15, 42.4, { density: 0.9 });
-
-    // ---- the streets themselves ----
-    // Bridges across the north-south street, so the deck is one piece again.
-    this.box('plate', 8.6, 0.30, 3.4, 2, DECK - 0.15, 52, { density: 0.7 });
-    this.box('plate', 8.6, 0.30, 3.4, 2, DECK - 0.15, 84, { density: 0.7 });
-    for (const bz of [52, 84]) {
-      for (const s of [-1, 1]) {
-        this.box('plate', 8.6, 1.05, 0.12, 2, DECK + 0.5, bz + s * 1.6,
-          { solid: false, density: 1.0 });
-      }
-    }
-
-    // Clutter down in the canyon, for cover and for scale.
-    drumCluster(this.batcher, { x: 1.2, z: 44, count: 5 });
-    this.collide(1.2, 0.45, 44, 2.2, 0.9, 2.2, 0, true);
-    drumCluster(this.batcher, { x: 3.4, z: 70, count: 4, mat: 'drumBlue' });
-    this.collide(3.4, 0.45, 70, 1.9, 0.9, 1.9, 0, true);
-    palletStack(this.batcher, { x: -0.6, z: 66, high: 4, ry: 0.2 });
-    this.collide(-0.6, 0.5, 66, 1.4, 1.0, 1.2, 0, true);
-    pipeRun(this.batcher, { x1: -2, z1: 36, x2: -2, z2: 88, y: 2.7, r: 0.20 });
-
-    // Rooflines joined up, so the high ground is a route and not four islands.
-    this.addCatwalk(-12, 48.5, -12, 65.5, DECK + 4.5, { width: 1.0 });
-    this.addCatwalk(-4.6, 46, 8.4, 46, DECK + 4.5, { width: 1.0 });
-
-    this.places.push({ x: 2, z: 60, ps: 'ښار', en: 'DOWNTOWN' });
-  }
-
-
-  /**
-   * The frontage: three apartments and three rooms on every side of the
-   * compound, with link walls closing the gaps between them.
-   *
-   * The plan calls for no empty edge. Each side gets the same six buildings in
-   * a different order and at different heights, so a player crossing the map
-   * always has a wall to break line of sight and a roof worth climbing to, and
-   * no two corners look alike.
-   *
-   * Colour follows the plan: red is painted iron, plain is white iron, and the
-   * grille sections are expanded metal you can shoot through the gaps of.
-   */
-  _frontage() {
-    const SLOTS = [-70, -42, -14, 14, 42, 70];
-    // Alternating room / apartment, cycling storeys and colours so that the
-    // same six never repeat in the same order on two sides.
-    const PLAN = [
-      { kind: 'apt',  storeys: 2, mat: 'sidingWhite' },
-      { kind: 'room', storeys: 1, mat: 'sidingRed',   roof: 'roofRed' },
-      { kind: 'apt',  storeys: 3, mat: 'sidingGrey' },
-      { kind: 'room', storeys: 2, mat: 'sidingWhite', roof: 'roof' },
-      { kind: 'apt',  storeys: 1, mat: 'mesh' },
-      { kind: 'room', storeys: 3, mat: 'sidingRed',   roof: 'roofRed' },
-    ];
-    const SIDES = [
-      // side, fixed coordinate, which way the doors face, plan rotation
-      { id: 'north', axis: 'x', at: -86, door: 'south', spin: 0, d: 15 },
-      { id: 'east',  axis: 'z', at: 90,  door: 'west',  spin: 2, d: 14 },
-      { id: 'south', axis: 'x', at: 94,  door: 'north', spin: 4, d: 9 },
-      { id: 'west',  axis: 'z', at: -88, door: 'east',  spin: 1, d: 15 },
-    ];
-
-    for (const side of SIDES) {
-      const built = [];
-      for (let i = 0; i < SLOTS.length; i++) {
-        const spec = PLAN[(i + side.spin) % PLAN.length];
-        const along = SLOTS[i];
-        const horizontal = side.axis === 'x';
-        const x = horizontal ? along : side.at;
-        const z = horizontal ? side.at : along;
-        const w = horizontal ? 22 : side.d;
-        const d = horizontal ? side.d : 22;
-        // A half-depth building, the plan's 0.5x: full height, half the plan.
-        const half = (i === 4);
-        const opts = {
-          x, z,
-          w: half && horizontal ? w * 0.5 : w,
-          d: half && !horizontal ? d * 0.5 : d,
-          storeys: spec.storeys,
-          mat: spec.mat,
-          door: side.door,
-          ladder: i % 3 === 1,
-        };
-        const b = spec.kind === 'room'
-          ? this.room({ ...opts, roof: spec.roof })
-          : this.apartment(opts);
-        built.push({ ...b, along, horizontal });
-      }
-
-      // Link walls: where there is no building the plan says there is a wall.
-      for (let i = 0; i < built.length - 1; i++) {
-        const a = built[i], c = built[i + 1];
-        const gapMid = (a.along + c.along) / 2;
-        const span = (c.along - a.along)
-          - (a.horizontal ? a.w + c.w : a.d + c.d) / 2 - 1.2;
-        if (span < 1.5) continue;
-        if (a.horizontal) {
-          this.box('wall', span, 3.4, 0.5, gapMid, 1.7, side.at, { density: 0.3 });
-          this.box('kerb', span + 0.4, 0.3, 0.8, gapMid, 3.55, side.at, { density: 0.9 });
-        } else {
-          this.box('wall', 0.5, 3.4, span, side.at, 1.7, gapMid, { density: 0.3 });
-          this.box('kerb', 0.8, 0.3, span + 0.4, side.at, 3.55, gapMid, { density: 0.9 });
-        }
-      }
-    }
-
-    // Ways up that are not stairs: a container against a wall, a stack that
-    // reaches a low roof, a tank you can climb from a catwalk. The plan asks
-    // for the climb to be found rather than signposted.
-    this._climbRoute(-70, -70, 0);
-    this._climbRoute(70, 76, Math.PI / 2);
-    this._climbRoute(-72, 74, 0);
-  }
-
-  /**
    * An indirect way onto a roof: two containers stacked against a low wall,
    * then a crate on top to bridge the last step.
    */
@@ -1001,13 +863,28 @@ export class ArenaMap {
     this.box('wood', 1.4, 1.1, 1.4, x + ox, 5.24 + 0.55, z + oz, { density: 1.2 });
   }
 
+  /**
+   * Roof to roof, and the climbs that are not stairs.
+   *
+   * The plan only marks a stair in a handful of places; everywhere else the
+   * way up is meant to be found — a container against a wall, a pipe stack, a
+   * tank lid, and catwalks that carry you on once you are up there.
+   */
   _connectors() {
-    // Plant roof -> warehouse deck, over the north street.
-    this.addCatwalk(-43, -58, 37, -62, 9.2, { width: 1.0 });
-    // Warehouse deck -> container tops, over the east street.
-    this.addCatwalk(60, -28, 62, 22, 7.9, { width: 0.95 });
-    // Tank lid -> plant roof, the longest and most exposed crossing.
-    this.addCatwalk(-62, 48, -58, -20, 12.0, { width: 0.9 });
+    // North APR roof -> the north-east corner block, over the north street.
+    this.addCatwalk(-14, -86, 30, -86, 11.0, { width: 1.0 });
+    // The middle room cluster -> the east street's grille line.
+    this.addCatwalk(31, -30, 44, -30, 11.0, { width: 0.95 });
+    // West APR roof -> the pipe yard, the longest and most exposed crossing.
+    this.addCatwalk(-51, -18, -34, -18, 10.8, { width: 0.9 });
+    // Water-store lid -> the south APR roof.
+    this.addCatwalk(29, 68, 29, 61, 10.4, { width: 0.9 });
+
+    // Container stacks with a crate on top, against a low eave.
+    this._climbRoute(-66, 62, 0);
+    this._climbRoute(16, -46, Math.PI / 2);
+    // The crate run onto the container tops by the east street.
+    this._crateSteps(52, 30, 0);
   }
 
   _clutter() {
@@ -1055,25 +932,20 @@ export class ArenaMap {
   }
 
   _spawnPoints() {
+    // Both sides start in the streets, at opposite ends of the compound, with
+    // a building between them and the middle so nobody spawns in a sightline.
     const north = [
-      [-76, -74], [-60, -78], [-42, -74], [-80, -56],
-      [40, -76], [56, -78], [70, -66], [24, -70],
+      [-70, -84], [-30, -80], [10, -84], [46, -84],
+      [-84, -46], [-52, -50], [24, -50], [70, -80],
     ];
     const south = [
-      [-76, 74], [-60, 78], [-42, 74], [-80, 56],
-      [40, 76], [56, 78], [70, 66], [24, 70],
+      [-70, 66], [-30, 70], [12, 66], [50, 62],
+      [-86, 74], [-24, 56], [70, 56], [86, 40],
     ];
     for (const [x, z] of north) this.spawns[0].push(new THREE.Vector3(x, 0.6, z));
     for (const [x, z] of south) this.spawns[1].push(new THREE.Vector3(x, 0.6, z));
-
-    // Downtown drops you into the streets between the decks, not on top of
-    // them: the climb is meant to be earned.
-    const town = [[2, 34.5], [2, 90], [-26, 62], [30, 60]];
-    for (let i = 0; i < town.length; i++) {
-      const [x, z] = town[i];
-      this.spawns[i % 2].push(new THREE.Vector3(x, 0.6, z));
-    }
   }
+
 
   /** Picks a spawn far from the given threats. */
   pickSpawn(team, threats = []) {
