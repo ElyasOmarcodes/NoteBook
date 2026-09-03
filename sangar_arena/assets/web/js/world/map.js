@@ -51,8 +51,16 @@ export class ArenaMap {
       transparent: true, opacity: 0.72,
       emissive: 0x9fb6c4, emissiveIntensity: 0.18,
     });
+    // Glazing is a dielectric, and that matters here. As a metal its colour
+    // multiplies the reflection instead of sitting under it, so a dark tint
+    // took the pane to nothing whichever way it faced — the black rectangles
+    // punched through the wall above every doorway. A dark dielectric at low
+    // roughness gets the Fresnel sheen glass actually has, and the faint
+    // emissive is the sky behind it, so it can never read as a hole.
     this.windowMat = new THREE.MeshStandardMaterial({
-      color: 0x1b2228, roughness: 0.16, metalness: 0.55,
+      color: 0x2b343c, roughness: 0.07, metalness: 0.0,
+      emissive: 0x53687a, emissiveIntensity: 0.34,
+      side: THREE.DoubleSide,
     });
   }
 
@@ -1038,7 +1046,9 @@ export function buildSky(scene, quality, renderer) {
 
   const SUN_DIR = new THREE.Vector3(120, 190, 84);
   if (renderer) {
-    scene.environment = buildEnvironment(renderer, SKY, 0x6a675c, SUN_DIR);
+    // The lower half of that sky is what every metal reflects when it is
+    // looked at level, and this yard's floor is pale concrete, not soil.
+    scene.environment = buildEnvironment(renderer, SKY, 0x8a877c, SUN_DIR);
     scene.environmentIntensity = 0.62;
   }
 
@@ -1047,7 +1057,9 @@ export function buildSky(scene, quality, renderer) {
   // scene is lit twice and washes out.
   const hemi = new THREE.HemisphereLight(0xc6dcee, 0x6a675c, 0.82);
   scene.add(hemi);
-  scene.add(new THREE.AmbientLight(0xa8bccd, 0.16));
+  // Enough to keep an interior readable. Rooms are open to be fought in, and
+  // the sun does not reach inside one.
+  scene.add(new THREE.AmbientLight(0xa8bccd, 0.30));
 
   // The sun is nailed to one direction over the whole map. It used to be moved
   // to follow the player every frame, so a wall's shadow slid across the
