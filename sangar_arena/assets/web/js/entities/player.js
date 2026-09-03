@@ -62,8 +62,14 @@ export class LocalPlayer {
     this.meleeTimer = 0;
     this.resupplyTimer = 0;
     this.shotsThisFrame = 0;
+    // Recoil is a *view offset*, not a change to the aim itself. Integrating
+    // it into `pitch` (as this used to) meant every shot permanently walked
+    // the view and it could never settle back; keeping it separate lets it
+    // decay to zero and return the reticle exactly where it started.
     this.recoilPitch = 0;
     this.recoilYaw = 0;
+    this.viewPitch = 0;
+    this.viewYaw = 0;
     this.airTimeStart = null;
     this.fallStartY = null;
 
@@ -76,7 +82,15 @@ export class LocalPlayer {
     this.viewModel = new ViewModel(camera);
     this.viewModel.setWeapon(this.weapons[0]);
 
-    this.thirdPerson = false;
+    // Third person is the default view: the camera rides behind and above the
+    // soldier so the player can see their own character, the way the reference
+    // game does. First person stays available for optics.
+    this.thirdPerson = true;
+    this.cameraDistance = 3.6;   // metres behind
+    this.cameraHeight = 0.75;    // metres above the eye
+    this.cameraSide = 0.55;      // over-the-shoulder offset
+    this._camPos = new THREE.Vector3();
+    this._aimPoint = new THREE.Vector3();
     this._applyBodyVisibility();
 
     this._tmpDir = new THREE.Vector3();
@@ -120,12 +134,32 @@ export class LocalPlayer {
     };
   }
 
+  /**
+   * Direction from `origin` to whatever the crosshair is actually over.
+   *
+   * In third person the camera sits behind and to the side of the soldier, so
+   * firing straight along the view direction from the muzzle would miss what
+   * the reticle is on. Converging on the point the camera ray hits fixes the
+   * parallax, which is how every over-the-shoulder shooter does it.
+   */
+  aimDirection(origin, out = new THREE.Vector3()) {
+    const dir = this.lookDirection();
+    if (!this.thirdPerson) return out.copy(dir);
+    const camPos = this.camera.position;
+    const hit = this.world.raycast(camPos, dir, 260);
+    const dist = Math.max(hit ? hit.distance : 260, 4);
+    this._aimPoint.copy(camPos).addScaledVector(dir, dist);
+    return out.copy(this._aimPoint).sub(origin).normalize();
+  }
+
   lookDirection(out = new THREE.Vector3()) {
-    const cp = Math.cos(this.pitch);
+    const pitch = this.viewPitch;
+    const yaw = this.viewYaw;
+    const cp = Math.cos(pitch);
     return out.set(
-      Math.sin(this.yaw) * cp,
-      Math.sin(this.pitch),
-      Math.cos(this.yaw) * cp).normalize();
+      Math.sin(yaw) * cp,
+      Math.sin(pitch),
+      Math.cos(yaw) * cp).normalize();
   }
 
   // =======================================================================
@@ -227,16 +261,21 @@ export class LocalPlayer {
     this.yaw -= look.x;
     this.pitch -= look.y;
 
-    // Recoil pushes the view, then recovers most (not all) of the way back.
-    this.pitch += this.recoilPitch * dt * 14;
-    this.yaw += this.recoilYaw * dt * 14;
-    this.recoilPitch *= Math.exp(-dt * 9);
-    this.recoilYaw *= Math.exp(-dt * 9);
-
     const limit = this.stance === 'prone' ? 0.85 : 1.45;
     this.pitch = THREE.MathUtils.clamp(this.pitch, -limit, limit);
     while (this.yaw > Math.PI) this.yaw -= Math.PI * 2;
     while (this.yaw < -Math.PI) this.yaw += Math.PI * 2;
+
+    // Recoil rises fast and settles back to zero, so the view ends each burst
+    // exactly where the player left it.
+    this.recoilPitch *= Math.exp(-dt * 7.5);
+    this.recoilYaw *= Math.exp(-dt * 7.5);
+    if (Math.abs(this.recoilPitch) < 1e-4) this.recoilPitch = 0;
+    if (Math.abs(this.recoilYaw) < 1e-4) this.recoilYaw = 0;
+
+    this.viewPitch = THREE.MathUtils.clamp(
+      this.pitch + this.recoilPitch, -1.5, 1.5);
+    this.viewYaw = this.yaw + this.recoilYaw;
   }
 
   _stance(dt, input, hooks) {
@@ -449,7 +488,7 @@ export class LocalPlayer {
     if (input.consumePress?.('melee') && this.meleeTimer <= 0) {
       this.meleeTimer = COMBAT.meleeCooldown;
       this.soldier.playOverlay(ANIM.MELEE, 0.55);
-      hooks.onMelee?.(this.eye.clone(), this.lookDirection());
+      hooks.onMelee?.(this.eye.clone(), this.aimDirection(this.eye.clone()));
     }
 
     // ---- grenade ----
@@ -457,8 +496,9 @@ export class LocalPlayer {
         && this.meleeTimer <= 0) {
       this.grenades--;
       this.soldier.playOverlay(ANIM.MELEE, 0.45);
-      const origin = this.eye.clone().addScaledVector(this.lookDirection(), 0.5);
-      hooks.onThrow?.(origin, this.lookDirection().clone(), this.grenadeDef);
+      const from = this.eye.clone();
+      const dir = this.aimDirection(from);
+      hooks.onThrow?.(from.addScaledVector(dir, 0.5), dir.clone(), this.grenadeDef);
     }
 
     // ---- reload request ----
@@ -514,7 +554,7 @@ export class LocalPlayer {
     this.shotsThisFrame += 1;
 
     const origin = this.eye.clone();
-    const base = this.lookDirection();
+    const base = this.aimDirection(origin);
     const spread = this.currentSpread();
 
     const shots = [];
@@ -534,8 +574,10 @@ export class LocalPlayer {
     // Recoil: mostly up, with a per-shot horizontal wobble.
     const recoil = weapon.recoil * (this.ads ? 0.62 : 1)
       * (this.stance === 'prone' ? 0.45 : this.stance === 'crouch' ? 0.75 : 1);
-    this.recoilPitch += recoil * 0.019;
-    this.recoilYaw += (Math.random() - 0.5) * recoil * 0.014;
+    // Capped so a long burst climbs to a plateau instead of pointing at the sky.
+    this.recoilPitch = Math.min(0.22, this.recoilPitch + recoil * 0.016);
+    this.recoilYaw = THREE.MathUtils.clamp(
+      this.recoilYaw + (Math.random() - 0.5) * recoil * 0.012, -0.10, 0.10);
     this.viewModel.kick(recoil);
 
     hooks.onFire?.({
@@ -591,27 +633,43 @@ export class LocalPlayer {
   }
 
   _camera(dt) {
-    const eye = this.eye;
+    const eye = this.eye.clone();
+
     if (this.thirdPerson) {
-      const back = new THREE.Vector3(
-        -Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-      const want = eye.clone().addScaledVector(back, 3.1);
-      want.y += 0.55;
-      // Do not let the chase camera clip through a wall behind the player.
-      const dir = want.clone().sub(eye);
-      const dist = dir.length();
-      dir.normalize();
-      const hit = this.world.raycast(eye, dir, dist);
-      // Keep enough distance that the camera never ends up inside the head.
-      if (hit) want.copy(eye).addScaledVector(dir, Math.max(1.35, hit.distance - 0.25));
-      this.camera.position.lerp(want, Math.min(1, dt * 14));
+      // Sit the camera behind, above and slightly to the side of the soldier,
+      // pulled along the view direction so looking up swings it down and vice
+      // versa — a normal over-the-shoulder chase rig.
+      const dir = this.lookDirection();
+      const right = new THREE.Vector3(dir.z, 0, -dir.x).normalize();
+
+      const pivot = eye.clone();
+      pivot.y += 0.10;
+      pivot.addScaledVector(right, this.cameraSide);
+
+      const want = pivot.clone()
+        .addScaledVector(dir, -this.cameraDistance);
+      want.y += this.cameraHeight;
+
+      // Never let the chase camera end up inside a wall — or inside the head.
+      const toCam = want.clone().sub(pivot);
+      const dist = toCam.length();
+      toCam.normalize();
+      const hit = this.world.raycast(pivot, toCam, dist + 0.3);
+      const limit = hit ? Math.max(1.1, hit.distance - 0.32) : dist;
+      want.copy(pivot).addScaledVector(toCam, limit);
+
+      this._camPos.lerp(want, Math.min(1, dt * 16));
+      if (this._camPos.lengthSq() === 0) this._camPos.copy(want);
+      this.camera.position.copy(this._camPos);
     } else {
       this.camera.position.copy(eye);
+      this._camPos.copy(eye);
     }
+
     this.camera.rotation.set(0, 0, 0, 'YXZ');
     this.camera.rotation.order = 'YXZ';
-    this.camera.rotation.y = this.yaw + Math.PI;
-    this.camera.rotation.x = -this.pitch;
+    this.camera.rotation.y = this.viewYaw + Math.PI;
+    this.camera.rotation.x = -this.viewPitch;
 
     // Field of view narrows with optics, widens a touch when sprinting.
     const zoom = this.scoped ? (this.weapon.scopeZoom ?? 2)

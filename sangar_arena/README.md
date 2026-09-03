@@ -37,8 +37,8 @@ shown at the top of their lobby.
 | **بورډونه / Boards** | د نقشې په هر څنډه او سیمه کې دوه‑ژبي بورډونه (پښتو + انګلیسي): سنګر چوک، شمشاد، هندوکش، ربع الخالي |
 | **پورته ختل / Roof access** | لرګینې زینې، لرګین او فولادي نردبانونه، او د بکسونو له لارې ګام‑په‑ګام ختل |
 | **پټې لارې / Hidden routes** | د بامونو ترمنځ نرۍ لارې او د پایپونو پُلونه چې له ښکته نه ښکاري |
-| **کرکټرونه / Agents** | شپږ جلا کرکټرونه، هر یو خپل مخ، جامې او صفتونه |
-| **وسلې / Weapons** | اته وسلې — **دوه یې په یو وخت** له ځان سره اخیستل کېږي (لومړنۍ + دویمه) |
+| **کرکټرونه / Agents** | ریښتینی rigged ۳ډي انسان موډل (۴۹ هډوکي)، شپږ جلا کرکټرونه |
+| **وسلې / Weapons** | اته وسلې چې په lathe/extrude جوړ شوي — **دوه یې په یو وخت** اخیستل کېږي |
 | **ګرنېټ / Grenades** | چاودېدونکی، رڼا او لوګی |
 | **حرکتونه / Animation** | دریدل، تګ، منډه، کرار تګ، ګونده، پرېوتل، ټوپ، پر نردبان ختل، ګام اچول، له لوړې ښکته کېدل، ډزې، ریلوډ، د مرمیو رسد، وهل |
 | **ټوسټونه / Kill toasts** | د هر وژنې په مهال ټولو ته نری بنر: «پلانکی، پلانکی وویشت» |
@@ -74,9 +74,24 @@ does not teleport anyone.
 at runtime onto a canvas, so the APK ships no image assets, and the whole static map is merged
 into a handful of draw calls.
 
-**Models.** Soldiers and weapons are built from primitives with a real joint hierarchy, and
-animated by a pose‑blending state machine. Drop a rigged `.glb` into `assets/models/` named
-after an agent id and `loadExternalRig()` will use it instead.
+**Models.** Soldiers are a real rigged mesh — `assets/web/models/soldier.glb`,
+11k triangles on a 49-bone Mixamo skeleton with finger joints and baked idle,
+walk and run clips. The clips drive locomotion through an `AnimationMixer`;
+everything they do not cover (crouch, prone, aim pitch, reload, recoil, melee,
+ladder climbing) is layered on top by rotating the same bones. See
+`assets/web/models/CREDITS.md` for the model's provenance.
+
+Weapons are modelled rather than blocked out: barrels, suppressors and scope
+bodies are profiles turned on a `LatheGeometry`, and receivers, magazines,
+stocks and grips are bevelled 2D outlines run through `ExtrudeGeometry`
+(`assets/web/js/entities/gunsmith.js`).
+
+**Textures.** No image files ship. Every surface is painted at runtime from
+value and cellular noise plus hand-written structure — a branching crack
+network for the asphalt, panel joints and form-tie holes for precast concrete,
+a real sinusoidal rib profile for corrugated steel, riveted plate courses for
+the tanks — and each derives its own normal and roughness map from an explicit
+height field (`assets/web/js/world/textures.js`).
 
 ---
 

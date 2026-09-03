@@ -1,10 +1,20 @@
 import * as THREE from '../../vendor/three.module.js';
+import {
+  rng, fbm, cellular, warp, clamp255, lerp, smoothstep,
+  crackNetwork, rainStreaks, blotches,
+} from './noise.js';
 
-// Every surface in the arena is painted at runtime onto a 2D canvas. That keeps
-// the APK small (no texture files to ship) while still giving the weathered,
-// photo-ish look of the reference screenshots: value noise for grain, streaks
-// for rain-wash, blotches for rust, and a matching normal map derived from the
-// albedo's luminance so the light actually catches the surface relief.
+/**
+ * Every surface in the arena is painted at runtime.
+ *
+ * The reference for the whole set is an abandoned refinery: cracked asphalt
+ * with oil stains, precast concrete panels streaked by rain, corrugated steel
+ * siding whose ribs catch the light, riveted tank plate, and ribbed shipping
+ * containers. Each painter below reproduces that surface's actual structure —
+ * the crack network, the panel seams, the rib profile, the rivet rows — rather
+ * than dusting noise over a flat colour, and each ships a matching normal and
+ * roughness map so the light behaves like it does on the real thing.
+ */
 
 const cache = new Map();
 
@@ -15,129 +25,45 @@ function makeCanvas(size) {
   return c;
 }
 
-/** getImageData is called on every texture canvas, so opt into the fast path. */
 function ctx2d(canvas) {
   return canvas.getContext('2d', { willReadFrequently: true });
 }
 
-// --- deterministic value noise -------------------------------------------
-function mulberry(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function valueNoise(size, cells, rnd) {
-  const grid = new Float32Array((cells + 1) * (cells + 1));
-  for (let i = 0; i < grid.length; i++) grid[i] = rnd();
-  const out = new Float32Array(size * size);
-  const step = size / cells;
-  const smooth = (t) => t * t * (3 - 2 * t);
-  for (let y = 0; y < size; y++) {
-    const gy = y / step, y0 = Math.floor(gy), fy = smooth(gy - y0);
-    for (let x = 0; x < size; x++) {
-      const gx = x / step, x0 = Math.floor(gx), fx = smooth(gx - x0);
-      const i00 = y0 * (cells + 1) + x0;
-      const a = grid[i00], b = grid[i00 + 1];
-      const c = grid[i00 + cells + 1], d = grid[i00 + cells + 2];
-      const top = a + (b - a) * fx;
-      const bot = c + (d - c) * fx;
-      out[y * size + x] = top + (bot - top) * fy;
-    }
-  }
-  return out;
-}
-
-function fbm(size, seed, octaves = 5, baseCells = 4) {
-  const rnd = mulberry(seed);
-  const out = new Float32Array(size * size);
-  let amp = 1, total = 0, cells = baseCells;
-  for (let o = 0; o < octaves; o++) {
-    const layer = valueNoise(size, cells, rnd);
-    for (let i = 0; i < out.length; i++) out[i] += layer[i] * amp;
-    total += amp;
-    amp *= 0.5;
-    cells *= 2;
-    if (cells > size) break;
-  }
-  for (let i = 0; i < out.length; i++) out[i] /= total;
-  return out;
-}
-
-function tint(ctx, size, noise, base, contrast) {
-  const img = ctx.getImageData(0, 0, size, size);
+/** Fills the canvas from a per-pixel callback returning [r,g,b]. */
+function paint(ctx, size, fn) {
+  const img = ctx.createImageData(size, size);
   const d = img.data;
-  for (let i = 0, n = 0; i < d.length; i += 4, n++) {
-    const v = (noise[n] - 0.5) * contrast;
-    d[i] = clamp255(base[0] + v * 255);
-    d[i + 1] = clamp255(base[1] + v * 255);
-    d[i + 2] = clamp255(base[2] + v * 255);
-    d[i + 3] = 255;
+  for (let y = 0, i = 0; y < size; y++) {
+    for (let x = 0; x < size; x++, i += 4) {
+      const [r, g, b] = fn(x, y, y * size + x);
+      d[i] = clamp255(r); d[i + 1] = clamp255(g); d[i + 2] = clamp255(b);
+      d[i + 3] = 255;
+    }
   }
   ctx.putImageData(img, 0, 0);
 }
 
-function clamp255(v) { return v < 0 ? 0 : v > 255 ? 255 : v | 0; }
+// =========================================================================
+// Map derivation
+// =========================================================================
 
-/** Rain streaks running down a vertical surface. */
-function streaks(ctx, size, seed, count, alpha, colour) {
-  const rnd = mulberry(seed);
-  ctx.save();
-  for (let i = 0; i < count; i++) {
-    const x = rnd() * size;
-    const w = 1 + rnd() * 5;
-    const top = rnd() * size * 0.4;
-    const h = size * (0.25 + rnd() * 0.7);
-    const g = ctx.createLinearGradient(0, top, 0, top + h);
-    g.addColorStop(0, `rgba(${colour}, ${alpha * (0.4 + rnd() * 0.6)})`);
-    g.addColorStop(1, `rgba(${colour}, 0)`);
-    ctx.fillStyle = g;
-    ctx.fillRect(x, top, w, h);
-  }
-  ctx.restore();
-}
-
-/** Irregular rust / grime blotches. */
-function blotches(ctx, size, seed, count, radius, colours) {
-  const rnd = mulberry(seed);
-  for (let i = 0; i < count; i++) {
-    const x = rnd() * size, y = rnd() * size;
-    const r = radius * (0.35 + rnd() * 1.4);
-    const c = colours[(rnd() * colours.length) | 0];
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, `rgba(${c}, ${0.30 + rnd() * 0.42})`);
-    g.addColorStop(0.55, `rgba(${c}, ${0.12 + rnd() * 0.18})`);
-    g.addColorStop(1, `rgba(${c}, 0)`);
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-/** Derive a tangent-space normal map from the albedo's luminance. */
-function normalFromCanvas(src, strength = 2.2) {
-  const size = src.width;
-  const sctx = ctx2d(src);
-  const s = sctx.getImageData(0, 0, size, size).data;
-  const dst = makeCanvas(size);
-  const dctx = ctx2d(dst);
-  const out = dctx.createImageData(size, size);
-  const d = out.data;
-  const lum = (i) => (s[i] * 0.299 + s[i + 1] * 0.587 + s[i + 2] * 0.114) / 255;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const i = (y * size + x) * 4;
-      const xl = (y * size + ((x - 1 + size) % size)) * 4;
-      const xr = (y * size + ((x + 1) % size)) * 4;
-      const yt = (((y - 1 + size) % size) * size + x) * 4;
-      const yb = (((y + 1) % size) * size + x) * 4;
-      const dx = (lum(xl) - lum(xr)) * strength;
-      const dy = (lum(yt) - lum(yb)) * strength;
+/**
+ * Tangent-space normal map from a height field.
+ *
+ * Deriving it from an explicit height (rather than from the albedo's
+ * luminance) is what stops a painted-on rust stain from reading as a dent.
+ */
+function normalFromHeight(height, size, strength = 3.0) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const img = ctx.createImageData(size, size);
+  const d = img.data;
+  const at = (x, y) => height[((y % size) + size) % size * size
+    + (((x % size) + size) % size)];
+  for (let y = 0, i = 0; y < size; y++) {
+    for (let x = 0; x < size; x++, i += 4) {
+      const dx = (at(x - 1, y) - at(x + 1, y)) * strength;
+      const dy = (at(x, y - 1) - at(x, y + 1)) * strength;
       const len = Math.hypot(dx, dy, 1);
       d[i] = clamp255(((dx / len) * 0.5 + 0.5) * 255);
       d[i + 1] = clamp255(((dy / len) * 0.5 + 0.5) * 255);
@@ -145,9 +71,731 @@ function normalFromCanvas(src, strength = 2.2) {
       d[i + 3] = 255;
     }
   }
-  dctx.putImageData(out, 0, 0);
-  return dst;
+  ctx.putImageData(img, 0, 0);
+  return c;
 }
+
+/** Greyscale roughness map from a 0..1 field. */
+function mapFromField(field, size) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const img = ctx.createImageData(size, size);
+  const d = img.data;
+  for (let i = 0, n = 0; i < d.length; i += 4, n++) {
+    const v = clamp255(field[n] * 255);
+    d[i] = d[i + 1] = d[i + 2] = v;
+    d[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/** Reads a painted canvas back as a 0..1 luminance field. */
+function luminanceOf(canvas, size) {
+  const data = ctx2d(canvas).getImageData(0, 0, size, size).data;
+  const out = new Float32Array(size * size);
+  for (let i = 0, n = 0; i < data.length; i += 4, n++) {
+    out[n] = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+  }
+  return out;
+}
+
+// =========================================================================
+// Painters — each returns { albedo, height, rough }
+// =========================================================================
+
+/**
+ * Weathered asphalt. Dark aggregate-flecked bitumen, a branching crack
+ * network, oil stains around where machinery stood, and lighter repair
+ * patches — the road surface that runs through the whole yard.
+ */
+function paintAsphalt(size, seed) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 6, cells: 6 });
+  const stones = cellular(size, seed + 11, Math.round(size / 18));
+  const chips = cellular(size, seed + 15, Math.round(size / 7));
+  const patch = fbm(size, seed + 3, { octaves: 3, cells: 2 });
+
+  paint(ctx, size, (x, y, i) => {
+    // Base bitumen: dark, mottled at low frequency so it never looks flat.
+    let v = 30 + grain[i] * 20;
+    // Aggregate: two grades of stone poking through the worn binder.
+    v += Math.pow(1 - stones[i], 3) * 74;
+    v += Math.pow(1 - chips[i], 5) * 52;
+    // Repair patches are a slightly different, greyer mix.
+    const isPatch = smoothstep(0.58, 0.68, patch[i]);
+    v = lerp(v, v * 0.82 + 22, isPatch);
+    const warm = 1 + (grain[i] - 0.5) * 0.06;
+    return [v * warm, v * 0.99, v * 0.96];
+  });
+
+  // Patch seams: a hard edge where the repair meets the old surface.
+  const seamCtx = ctx;
+  seamCtx.save();
+  seamCtx.globalAlpha = 0.5;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x;
+      const here = patch[i] > 0.63;
+      const right = patch[y * size + ((x + 1) % size)] > 0.63;
+      const down = patch[((y + 1) % size) * size + x] > 0.63;
+      if (here !== right || here !== down) {
+        seamCtx.fillStyle = 'rgba(22,22,24,0.85)';
+        seamCtx.fillRect(x, y, 1.5, 1.5);
+      }
+    }
+  }
+  seamCtx.restore();
+
+  crackNetwork(ctx, size, seed + 21, {
+    trunks: 14, maxDepth: 4, width: 3.0, colour: '10,10,12', alpha: 0.92,
+  });
+  crackNetwork(ctx, size, seed + 27, {
+    trunks: 9, maxDepth: 2, width: 1.2, colour: '16,16,18', alpha: 0.6,
+  });
+  // Oil: near-black, slightly glossy pools.
+  blotches(ctx, size, seed + 31, {
+    count: 10, radius: size * 0.075, alpha: 0.55,
+    colours: ['12,12,14', '18,16,14'],
+  });
+  // Dust and dried mud washed across it.
+  blotches(ctx, size, seed + 41, {
+    count: 12, radius: size * 0.09, alpha: 0.16,
+    colours: ['118,112,98', '86,84,78'],
+  });
+
+  const height = luminanceOf(c, size);
+  const rough = new Float32Array(size * size);
+  for (let i = 0; i < rough.length; i++) {
+    // Oil pools are the only smooth thing on an asphalt yard.
+    rough[i] = height[i] < 0.14 ? 0.35 : 0.93 - (1 - stones[i]) * 0.10;
+  }
+  return { albedo: c, height, rough, normalStrength: 2.2 };
+}
+
+/**
+ * Precast concrete panel — the perimeter and dividing walls. Panel joints,
+ * form-tie holes, a chipped bottom edge and heavy rain-wash down the face.
+ */
+function paintConcrete(size, seed, { panelRows = 2, tint = 1 } = {}) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 6, cells: 3 });
+  const fine = fbm(size, seed + 5, { octaves: 4, cells: 24 });
+  const blotch = warp(size, fbm(size, seed + 7, { octaves: 3, cells: 3 }),
+    fbm(size, seed + 9, { octaves: 2, cells: 5 }), size * 0.06);
+
+  paint(ctx, size, (x, y, i) => {
+    let v = 172 + (grain[i] - 0.5) * 28 + (fine[i] - 0.5) * 14;
+    // Damp patches: concrete darkens unevenly where it holds water, but only
+    // gently — heavy blotching reads as camouflage, not as a wall.
+    v -= smoothstep(0.60, 0.86, blotch[i]) * 20;
+    const r = v * 1.005 * tint, g = v * 0.998 * tint, b = v * 0.965 * tint;
+    return [r, g, b];
+  });
+
+  // Panel joints — a recessed dark line with a light lip below it.
+  const rowH = size / panelRows;
+  ctx.save();
+  for (let r = 1; r <= panelRows; r++) {
+    const y = r * rowH;
+    ctx.fillStyle = 'rgba(96,96,92,0.88)';
+    ctx.fillRect(0, y - 4, size, 4);
+    ctx.fillStyle = 'rgba(224,222,214,0.55)';
+    ctx.fillRect(0, y, size, 3);
+  }
+  // Vertical joints, offset per row like real panel runs.
+  for (let r = 0; r < panelRows; r++) {
+    const rand = rng(seed + 100 + r);
+    const x = (0.35 + rand() * 0.3) * size;
+    ctx.fillStyle = 'rgba(72,72,70,0.6)';
+    ctx.fillRect(x, r * rowH, 3, rowH);
+  }
+  ctx.restore();
+
+  // Form-tie holes: small dark dimples in a regular grid.
+  const rand = rng(seed + 13);
+  for (let r = 0; r < panelRows; r++) {
+    for (let k = 0; k < 4; k++) {
+      const x = (k + 0.5) * (size / 4) + (rand() - 0.5) * 8;
+      const y = r * rowH + rowH * (0.3 + rand() * 0.4);
+      const g = ctx.createRadialGradient(x, y, 0, x, y, 5);
+      g.addColorStop(0, 'rgba(56,54,50,0.85)');
+      g.addColorStop(1, 'rgba(56,54,50,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  rainStreaks(ctx, size, seed + 17, {
+    count: 46, colour: '62,60,54', alpha: 0.34, maxWidth: 7,
+  });
+  blotches(ctx, size, seed + 19, {
+    count: 12, radius: size * 0.06, alpha: 0.13,
+    colours: ['104,98,84', '96,100,96', '186,182,172'],
+  });
+
+  const height = luminanceOf(c, size);
+  const rough = new Float32Array(size * size).fill(0.94);
+  return { albedo: c, height, rough, normalStrength: 1.5 };
+}
+
+/**
+ * Corrugated steel siding — the signature surface of the whole set.
+ *
+ * The ribs are shaded from an actual sinusoidal profile rather than a linear
+ * gradient, so the highlight sits where the sheet's crown is and the shadow in
+ * the valley. Fastener rows, vertical dirt washes and rust creeping up from
+ * the bottom edge finish it.
+ */
+function paintCorrugated(size, seed, {
+  base = [206, 208, 205], ribs = 26, rust = 0.55, dirt = 0.6,
+} = {}) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 4, cells: 8 });
+  const wash = fbm(size, seed + 3, { octaves: 3, cells: 4 });
+  const period = size / ribs;
+
+  paint(ctx, size, (x, y, i) => {
+    // Rib profile: crown -> valley -> crown across one period.
+    const t = (x % period) / period;
+    const profile = Math.cos(t * Math.PI * 2);          // +1 crown, -1 valley
+    // Light comes from the upper left, so the left flank of each crown is lit.
+    const flank = Math.sin(t * Math.PI * 2);
+    const shade = profile * 0.16 + flank * 0.20;
+
+    let v = 1 + shade;
+    v *= 0.92 + grain[i] * 0.16;
+    // Vertical dirt wash, heavier low down.
+    v -= wash[i] * dirt * 0.22 * (0.4 + (y / size) * 0.8);
+
+    let r = base[0] * v, g = base[1] * v, b = base[2] * v;
+    // Rust climbs from the bottom edge and pools in the valleys.
+    const low = smoothstep(0.55, 1.0, y / size);
+    const inValley = smoothstep(-0.2, -1.0, profile);
+    const rustAmt = Math.min(1, low * rust * (0.5 + inValley * 0.9)
+      * (0.4 + grain[i] * 1.2));
+    r = lerp(r, 132, rustAmt); g = lerp(g, 62, rustAmt); b = lerp(b, 30, rustAmt);
+    return [r, g, b];
+  });
+
+  // Fastener rows across the sheet, one screw per crown.
+  const rows = 6;
+  const rand = rng(seed + 7);
+  for (let row = 0; row < rows; row++) {
+    const y = (row + 0.5) * (size / rows);
+    for (let i = 0; i < ribs; i++) {
+      const x = (i + 0.5) * period;
+      ctx.fillStyle = 'rgba(48,42,36,0.65)';
+      ctx.beginPath(); ctx.arc(x, y + (rand() - 0.5) * 2, 1.9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(160,120,84,0.30)';
+      ctx.beginPath(); ctx.arc(x, y + 2.4, 2.6, 0, Math.PI); ctx.fill();
+    }
+  }
+
+  rainStreaks(ctx, size, seed + 11, {
+    count: 34, colour: '96,58,30', alpha: 0.30 * rust, maxWidth: 4,
+  });
+  blotches(ctx, size, seed + 13, {
+    count: Math.round(22 * rust), radius: size * 0.055, alpha: 0.42,
+    colours: ['142,72,30', '104,50,22', '166,104,48'],
+  });
+
+  // Height comes from the rib profile alone: the rust must not emboss.
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const t = (x % period) / period;
+      height[y * size + x] = 0.5 + Math.cos(t * Math.PI * 2) * 0.5;
+    }
+  }
+  const rough = new Float32Array(size * size);
+  const lum = luminanceOf(c, size);
+  for (let i = 0; i < rough.length; i++) {
+    // Painted steel is fairly smooth; rust is not.
+    rough[i] = 0.42 + (1 - lum[i]) * 0.45;
+  }
+  return { albedo: c, height, rough, normalStrength: 4.5, metalness: 0.45 };
+}
+
+/**
+ * Roof sheeting — flat panels laid in courses, in the dusty rose, rust red and
+ * blue-grey of the reference roofs, with chalky weathering blooms.
+ */
+function paintRoof(size, seed, base = [150, 118, 122]) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 5, cells: 6 });
+  const chalk = warp(size, fbm(size, seed + 5, { octaves: 3, cells: 3 }),
+    fbm(size, seed + 6, { octaves: 2, cells: 6 }), size * 0.05);
+
+  const cols = 6, rows = 10;
+  const cw = size / cols, ch = size / rows;
+
+  paint(ctx, size, (x, y, i) => {
+    const col = Math.floor(x / cw), row = Math.floor(y / ch);
+    const sheetRand = ((col * 73 + row * 131) % 17) / 17;
+    let v = 0.88 + sheetRand * 0.22 + (grain[i] - 0.5) * 0.20;
+    // Chalky white weathering, the most recognisable thing about these roofs.
+    const bloom = smoothstep(0.52, 0.80, chalk[i]);
+    let r = base[0] * v, g = base[1] * v, b = base[2] * v;
+    r = lerp(r, 226, bloom * 0.65);
+    g = lerp(g, 224, bloom * 0.65);
+    b = lerp(b, 220, bloom * 0.65);
+    return [r, g, b];
+  });
+
+  // Seams between sheets, and the raised standing seam highlight.
+  ctx.save();
+  for (let col = 1; col < cols; col++) {
+    const x = col * cw;
+    ctx.fillStyle = 'rgba(52,44,44,0.55)';
+    ctx.fillRect(x - 1.5, 0, 3, size);
+    ctx.fillStyle = 'rgba(238,236,230,0.22)';
+    ctx.fillRect(x + 1.5, 0, 2, size);
+  }
+  for (let row = 1; row < rows; row++) {
+    const y = row * ch;
+    ctx.fillStyle = 'rgba(48,40,40,0.45)';
+    ctx.fillRect(0, y - 1.5, size, 2.5);
+  }
+  ctx.restore();
+
+  blotches(ctx, size, seed + 9, {
+    count: 20, radius: size * 0.07, alpha: 0.30,
+    colours: ['124,70,44', '92,74,72', '206,202,196'],
+  });
+  rainStreaks(ctx, size, seed + 12, {
+    count: 22, colour: '74,54,48', alpha: 0.20, maxWidth: 5,
+  });
+
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = Math.abs((x % cw) - cw / 2) / (cw / 2);
+      height[y * size + x] = 0.35 + Math.pow(dx, 6) * 0.65;
+    }
+  }
+  const rough = new Float32Array(size * size).fill(0.62);
+  return { albedo: c, height, rough, normalStrength: 3.0, metalness: 0.32 };
+}
+
+/**
+ * Painted concrete block — the light blue-white block walls on the office
+ * blocks, with visible mortar courses.
+ */
+function paintBlock(size, seed) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 5, cells: 10 });
+  const damp = fbm(size, seed + 4, { octaves: 3, cells: 3 });
+
+  const rows = 10;
+  const rowH = size / rows;
+  const blockW = size / 5;
+  const rand = rng(seed + 2);
+
+  ctx.fillStyle = '#8d9296';
+  ctx.fillRect(0, 0, size, size);   // mortar
+  for (let r = 0; r < rows; r++) {
+    const offset = (r % 2) * (blockW / 2);
+    for (let i = -1; i < 6; i++) {
+      const x = offset + i * blockW;
+      const y = r * rowH;
+      const tone = 176 + rand() * 24;
+      ctx.fillStyle = `rgb(${tone | 0},${(tone * 1.02) | 0},${(tone * 1.04) | 0})`;
+      ctx.fillRect(x + 2, y + 2, blockW - 4, rowH - 4);
+      // The bottom of each block picks up grime.
+      ctx.fillStyle = `rgba(96,98,96,${0.10 + rand() * 0.14})`;
+      ctx.fillRect(x + 2, y + rowH - 6, blockW - 4, 4);
+    }
+  }
+
+  // Grain and damp over the top.
+  const img = ctx.getImageData(0, 0, size, size);
+  for (let i = 0, n = 0; i < img.data.length; i += 4, n++) {
+    const v = (grain[n] - 0.5) * 34 - smoothstep(0.55, 0.8, damp[n]) * 26;
+    img.data[i] = clamp255(img.data[i] + v);
+    img.data[i + 1] = clamp255(img.data[i + 1] + v);
+    img.data[i + 2] = clamp255(img.data[i + 2] + v * 0.95);
+  }
+  ctx.putImageData(img, 0, 0);
+
+  rainStreaks(ctx, size, seed + 8, {
+    count: 30, colour: '70,72,70', alpha: 0.26, maxWidth: 5,
+  });
+
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const r = Math.floor(y / rowH);
+    const offset = (r % 2) * (blockW / 2);
+    for (let x = 0; x < size; x++) {
+      const lx = (((x - offset) % blockW) + blockW) % blockW;
+      const ly = y % rowH;
+      const inBlock = lx > 2 && lx < blockW - 2 && ly > 2 && ly < rowH - 2;
+      height[y * size + x] = inBlock ? 0.75 : 0.25;
+    }
+  }
+  const rough = new Float32Array(size * size).fill(0.9);
+  return { albedo: c, height, rough, normalStrength: 2.4 };
+}
+
+/**
+ * Riveted tank plate — the storage tanks. Horizontal plate courses, a rivet
+ * row along every seam, and long rust weeps beneath them.
+ */
+function paintTank(size, seed) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 5, cells: 5 });
+  const bands = 5;
+  const bh = size / bands;
+
+  paint(ctx, size, (x, y, i) => {
+    const local = (y % bh) / bh;
+    // Each plate course is very slightly domed, and darkens toward its lap.
+    const dome = Math.sin(local * Math.PI) * 0.06;
+    let v = 0.86 + dome + (grain[i] - 0.5) * 0.14;
+    v -= smoothstep(0.86, 1.0, local) * 0.22;
+    const base = 196 * v;
+    return [base * 1.005, base * 1.0, base * 0.985];
+  });
+
+  const rand = rng(seed + 3);
+  for (let b = 1; b <= bands; b++) {
+    const y = b * bh;
+    ctx.fillStyle = 'rgba(84,82,78,0.80)';
+    ctx.fillRect(0, y - 3, size, 3);
+    ctx.fillStyle = 'rgba(236,234,228,0.42)';
+    ctx.fillRect(0, y, size, 2);
+    // Rivets.
+    const n = Math.round(size / 14);
+    for (let i = 0; i < n; i++) {
+      const x = (i + 0.5) * (size / n);
+      const ry = y - 6 + (rand() - 0.5) * 1.5;
+      const g = ctx.createRadialGradient(x - 0.8, ry - 0.8, 0, x, ry, 3.2);
+      g.addColorStop(0, 'rgba(232,230,224,0.75)');
+      g.addColorStop(0.55, 'rgba(150,148,142,0.55)');
+      g.addColorStop(1, 'rgba(70,66,62,0.5)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, ry, 3.2, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  rainStreaks(ctx, size, seed + 6, {
+    count: 40, colour: '118,66,32', alpha: 0.30, maxWidth: 5,
+  });
+  blotches(ctx, size, seed + 8, {
+    count: 22, radius: size * 0.05, alpha: 0.40,
+    colours: ['146,80,34', '112,58,26', '176,172,166'],
+  });
+
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const local = (y % bh) / bh;
+    const v = 0.5 + Math.sin(local * Math.PI) * 0.25
+      - smoothstep(0.9, 1.0, local) * 0.4;
+    for (let x = 0; x < size; x++) height[y * size + x] = v;
+  }
+  const rough = new Float32Array(size * size).fill(0.55);
+  return { albedo: c, height, rough, normalStrength: 2.6, metalness: 0.55 };
+}
+
+/**
+ * Shipping container flank — deep trapezoidal ribs, top and bottom rails, and
+ * the heavy scuffing these things carry.
+ */
+function paintContainer(size, seed, base = [46, 88, 128]) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 4, cells: 7 });
+  const ribs = 11;
+  const period = size / ribs;
+  const railH = size * 0.085;
+
+  paint(ctx, size, (x, y, i) => {
+    const t = (x % period) / period;
+    // Trapezoidal profile: flat crown, sloped flanks, flat valley.
+    let profile;
+    if (t < 0.18) profile = 1;
+    else if (t < 0.34) profile = 1 - (t - 0.18) / 0.16 * 2;
+    else if (t < 0.66) profile = -1;
+    else if (t < 0.82) profile = -1 + (t - 0.66) / 0.16 * 2;
+    else profile = 1;
+    const flank = (t > 0.18 && t < 0.34) ? 0.30
+      : (t > 0.66 && t < 0.82) ? -0.26 : 0;
+
+    let v = 1 + profile * 0.10 + flank;
+    v *= 0.9 + grain[i] * 0.2;
+
+    // The end rails are plain plate, not ribbed.
+    const inRail = y < railH || y > size - railH;
+    if (inRail) v = 0.78 + grain[i] * 0.18;
+
+    return [base[0] * v, base[1] * v, base[2] * v];
+  });
+
+  blotches(ctx, size, seed + 5, {
+    count: 26, radius: size * 0.05, alpha: 0.45,
+    colours: ['128,64,28', '92,46,22', '188,186,182', '40,40,42'],
+  });
+  rainStreaks(ctx, size, seed + 9, {
+    count: 24, colour: '92,50,24', alpha: 0.26, maxWidth: 3,
+  });
+
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const inRail = y < railH || y > size - railH;
+    for (let x = 0; x < size; x++) {
+      const t = (x % period) / period;
+      let h;
+      if (t < 0.18) h = 1;
+      else if (t < 0.34) h = 1 - (t - 0.18) / 0.16;
+      else if (t < 0.66) h = 0;
+      else if (t < 0.82) h = (t - 0.66) / 0.16;
+      else h = 1;
+      height[y * size + x] = inRail ? 0.9 : h;
+    }
+  }
+  const rough = new Float32Array(size * size).fill(0.66);
+  return { albedo: c, height, rough, normalStrength: 5.0, metalness: 0.38 };
+}
+
+/** Bleached pallet and crate timber, grey-tan with open grain and knots. */
+function paintWood(size, seed) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const planks = 6;
+  const pw = size / planks;
+  const rand = rng(seed);
+  const fine = fbm(size, seed + 3, { octaves: 4, cells: 20 });
+
+  for (let p = 0; p < planks; p++) {
+    const base = 148 + rand() * 34;
+    ctx.fillStyle = `rgb(${base | 0},${(base * 0.90) | 0},${(base * 0.74) | 0})`;
+    ctx.fillRect(p * pw, 0, pw, size);
+
+    // Grain: long wandering lines along the plank.
+    for (let g = 0; g < 26; g++) {
+      const x = p * pw + rand() * pw;
+      const dark = 0.55 + rand() * 0.3;
+      ctx.strokeStyle = `rgba(${(base * dark * 0.7) | 0},${(base * dark * 0.58) | 0},${(base * dark * 0.42) | 0},${0.25 + rand() * 0.3})`;
+      ctx.lineWidth = 0.4 + rand() * 1.4;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      for (let y = 0; y <= size; y += 18) {
+        ctx.lineTo(x + Math.sin(y * 0.02 + p * 2.1) * 3 + (rand() - 0.5) * 2, y);
+      }
+      ctx.stroke();
+    }
+    // A knot or two.
+    if (rand() < 0.6) {
+      const kx = p * pw + pw * (0.3 + rand() * 0.4);
+      const ky = rand() * size;
+      for (let r = 7; r > 0; r--) {
+        ctx.strokeStyle = `rgba(84,60,38,${0.10 + (7 - r) * 0.05})`;
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.ellipse(kx, ky, r * 1.6, r * 2.6, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    // Gap between planks.
+    ctx.fillStyle = 'rgba(38,28,18,0.55)';
+    ctx.fillRect(p * pw + pw - 2.5, 0, 2.5, size);
+  }
+
+  const img = ctx.getImageData(0, 0, size, size);
+  for (let i = 0, n = 0; i < img.data.length; i += 4, n++) {
+    const v = (fine[n] - 0.5) * 22;
+    img.data[i] = clamp255(img.data[i] + v);
+    img.data[i + 1] = clamp255(img.data[i + 1] + v);
+    img.data[i + 2] = clamp255(img.data[i + 2] + v);
+  }
+  ctx.putImageData(img, 0, 0);
+
+  blotches(ctx, size, seed + 11, {
+    count: 14, radius: size * 0.06, alpha: 0.20,
+    colours: ['74,54,32', '176,170,158'],
+  });
+
+  const height = luminanceOf(c, size);
+  const rough = new Float32Array(size * size).fill(0.95);
+  return { albedo: c, height, rough, normalStrength: 1.8 };
+}
+
+/** Rusted steel drum: banded, heavily corroded. */
+function paintDrum(size, seed, base = [176, 150, 62]) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 5, cells: 8 });
+  const rustField = warp(size, fbm(size, seed + 4, { octaves: 4, cells: 4 }),
+    fbm(size, seed + 6, { octaves: 3, cells: 8 }), size * 0.08);
+
+  paint(ctx, size, (x, y, i) => {
+    let v = 0.9 + (grain[i] - 0.5) * 0.22;
+    // Two rolling hoops around the drum.
+    const ring = Math.abs(Math.sin(y / size * Math.PI * 3));
+    v += smoothstep(0.94, 1.0, ring) * 0.16;
+    let r = base[0] * v, g = base[1] * v, b = base[2] * v;
+    const rust = smoothstep(0.55, 0.88, rustField[i]) * 0.8;
+    r = lerp(r, 128, rust); g = lerp(g, 60, rust); b = lerp(b, 28, rust);
+    return [r, g, b];
+  });
+
+  rainStreaks(ctx, size, seed + 7, {
+    count: 28, colour: '96,48,20', alpha: 0.34, maxWidth: 4,
+  });
+
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    const ring = Math.abs(Math.sin(y / size * Math.PI * 3));
+    const v = 0.5 + smoothstep(0.92, 1.0, ring) * 0.5;
+    for (let x = 0; x < size; x++) height[y * size + x] = v;
+  }
+  const rough = new Float32Array(size * size).fill(0.72);
+  return { albedo: c, height, rough, normalStrength: 3.2, metalness: 0.4 };
+}
+
+/**
+ * The yard's hardstanding: worn concrete slabs with expansion joints, patched
+ * asphalt repairs and the oil that soaks into both. This is what the ground
+ * actually is in the reference set — not sand.
+ */
+function paintYard(size, seed) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 6, cells: 5 });
+  const grit = cellular(size, seed + 7, Math.round(size / 14));
+  const patch = fbm(size, seed + 3, { octaves: 3, cells: 2 });
+
+  paint(ctx, size, (x, y, i) => {
+    let v = 96 + grain[i] * 40;
+    v += Math.pow(1 - grit[i], 4) * 46;
+    // Asphalt repairs are markedly darker than the slab around them.
+    v = lerp(v, 46 + grain[i] * 18, smoothstep(0.54, 0.64, patch[i]));
+    return [v * 1.0, v * 0.995, v * 0.975];
+  });
+
+  // Slab expansion joints on a 4-square grid.
+  ctx.save();
+  for (let i = 1; i < 4; i++) {
+    const p = (size / 4) * i;
+    ctx.fillStyle = 'rgba(46,46,46,0.72)';
+    ctx.fillRect(p - 2, 0, 3, size);
+    ctx.fillRect(0, p - 2, size, 3);
+  }
+  ctx.restore();
+
+  crackNetwork(ctx, size, seed + 21, {
+    trunks: 8, maxDepth: 3, width: 1.8, colour: '30,30,32', alpha: 0.6,
+  });
+  blotches(ctx, size, seed + 31, {
+    count: 12, radius: size * 0.07, alpha: 0.42,
+    colours: ['20,20,22', '30,26,22'],
+  });
+  blotches(ctx, size, seed + 37, {
+    count: 10, radius: size * 0.09, alpha: 0.16,
+    colours: ['150,146,134', '108,104,96'],
+  });
+
+  const height = luminanceOf(c, size);
+  const rough = new Float32Array(size * size).fill(0.93);
+  return { albedo: c, height, rough, normalStrength: 2.0 };
+}
+
+/** Gravel and dirt hardstanding between the buildings. */
+function paintGravel(size, seed) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const stones = cellular(size, seed, Math.round(size / 12));
+  const stones2 = cellular(size, seed + 3, Math.round(size / 26));
+  const dirt = fbm(size, seed + 5, { octaves: 5, cells: 4 });
+
+  paint(ctx, size, (x, y, i) => {
+    let v = 62 + dirt[i] * 34;
+    v += Math.pow(1 - stones[i], 3) * 68;
+    v += Math.pow(1 - stones2[i], 5) * 44;
+    return [v * 1.01, v * 0.99, v * 0.94];
+  });
+  blotches(ctx, size, seed + 9, {
+    count: 18, radius: size * 0.09, alpha: 0.28,
+    colours: ['70,64,54', '132,124,106'],
+  });
+
+  const height = luminanceOf(c, size);
+  const rough = new Float32Array(size * size).fill(0.97);
+  return { albedo: c, height, rough, normalStrength: 3.0 };
+}
+
+/** Galvanised walkway plate with a diamond tread. */
+function paintPlate(size, seed) {
+  const c = makeCanvas(size);
+  const ctx = ctx2d(c);
+  const grain = fbm(size, seed, { octaves: 4, cells: 10 });
+  paint(ctx, size, (x, y, i) => {
+    const v = 132 + (grain[i] - 0.5) * 46;
+    return [v, v * 1.01, v * 1.03];
+  });
+
+  const height = new Float32Array(size * size).fill(0.3);
+  const pitch = size / 8;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(212,216,220,0.30)';
+  ctx.lineWidth = 5;
+  for (let i = -size; i < size * 2; i += pitch) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + size, size); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(i + size, 0); ctx.lineTo(i, size); ctx.stroke();
+  }
+  ctx.restore();
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const a = ((x + y) % pitch) / pitch;
+      const b = ((x - y + size * 2) % pitch) / pitch;
+      const tread = Math.max(smoothstep(0.42, 0.5, a) * smoothstep(0.58, 0.5, a),
+        smoothstep(0.42, 0.5, b) * smoothstep(0.58, 0.5, b));
+      height[y * size + x] = 0.3 + tread * 0.7;
+    }
+  }
+  blotches(ctx, size, seed + 4, {
+    count: 18, radius: size * 0.05, alpha: 0.35,
+    colours: ['128,70,32', '70,72,74'],
+  });
+  const rough = new Float32Array(size * size).fill(0.5);
+  return { albedo: c, height, rough, normalStrength: 3.4, metalness: 0.6 };
+}
+
+// =========================================================================
+// Registry
+// =========================================================================
+
+const PAINTERS = {
+  asphalt:  (s) => paintAsphalt(s, 307),
+  gravel:   (s) => paintGravel(s, 401),
+  yard:     (s) => paintYard(s, 431),
+  concrete: (s) => paintConcrete(s, 101, { panelRows: 2 }),
+  wall:     (s) => paintConcrete(s, 211, { panelRows: 3, tint: 0.97 }),
+  kerb:     (s) => paintConcrete(s, 233, { panelRows: 1, tint: 1.06 }),
+  block:    (s) => paintBlock(s, 509),
+  brick:    (s) => paintBlock(s, 517),
+  roof:         (s) => paintRoof(s, 601, [146, 120, 126]),
+  roofRed:      (s) => paintRoof(s, 613, [140, 84, 70]),
+  roofBlue:     (s) => paintRoof(s, 617, [150, 160, 164]),
+  tank:     (s) => paintTank(s, 701),
+  wood:     (s) => paintWood(s, 809),
+  plate:    (s) => paintPlate(s, 907),
+  sidingGrey: (s) => paintCorrugated(s, 1201, { base: [204, 208, 208], rust: 0.45 }),
+  sidingBlue: (s) => paintCorrugated(s, 1103, { base: [168, 190, 196], rust: 0.40 }),
+  sidingRed:  (s) => paintCorrugated(s, 1009, { base: [156, 92, 78], rust: 0.85 }),
+  sidingWhite:(s) => paintCorrugated(s, 1307, { base: [222, 222, 216], rust: 0.30 }),
+  containerBlue:  (s) => paintContainer(s, 1303, [46, 88, 128]),
+  containerRust:  (s) => paintContainer(s, 1409, [132, 66, 44]),
+  containerGreen: (s) => paintContainer(s, 1511, [58, 92, 72]),
+  drum:      (s) => paintDrum(s, 1601, [166, 148, 76]),
+  drumBlue:  (s) => paintDrum(s, 1607, [46, 84, 152]),
+};
 
 function finish(canvas, { repeat = [1, 1], aniso = 4, srgb = true } = {}) {
   const tex = new THREE.CanvasTexture(canvas);
@@ -159,314 +807,53 @@ function finish(canvas, { repeat = [1, 1], aniso = 4, srgb = true } = {}) {
   return tex;
 }
 
-// =========================================================================
-// Painters
-// =========================================================================
-
-function paintConcrete(size, seed) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  tint(ctx, size, fbm(size, seed, 6, 3), [150, 150, 145], 0.55);
-  // aggregate speckle
-  const rnd = mulberry(seed + 7);
-  for (let i = 0; i < size * 3; i++) {
-    const x = rnd() * size, y = rnd() * size, r = rnd() * 1.8 + 0.3;
-    ctx.fillStyle = `rgba(${90 + rnd() * 70 | 0},${90 + rnd() * 70 | 0},${88 + rnd() * 60 | 0},${0.10 + rnd() * 0.28})`;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-  }
-  // form-work seams
-  ctx.strokeStyle = 'rgba(70,72,70,0.35)';
-  ctx.lineWidth = 2;
-  for (let i = 1; i < 4; i++) {
-    ctx.beginPath();
-    ctx.moveTo(0, (size / 4) * i);
-    ctx.lineTo(size, (size / 4) * i + (mulberry(seed + i)() - 0.5) * 6);
-    ctx.stroke();
-  }
-  streaks(ctx, size, seed + 21, 34, 0.30, '58,58,54');
-  blotches(ctx, size, seed + 31, 16, size * 0.10, ['92,84,70', '70,74,70', '120,116,104']);
-  return c;
-}
-
-function paintCorrugated(size, seed, hue) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  tint(ctx, size, fbm(size, seed, 5, 5), hue, 0.30);
-  // vertical ribs
-  const ribs = 22;
-  const w = size / ribs;
-  for (let i = 0; i < ribs; i++) {
-    const x = i * w;
-    const g = ctx.createLinearGradient(x, 0, x + w, 0);
-    g.addColorStop(0.0, 'rgba(0,0,0,0.34)');
-    g.addColorStop(0.35, 'rgba(255,255,255,0.14)');
-    g.addColorStop(0.62, 'rgba(255,255,255,0.05)');
-    g.addColorStop(1.0, 'rgba(0,0,0,0.34)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x, 0, w, size);
-  }
-  blotches(ctx, size, seed + 5, 40, size * 0.09,
-    ['142,68,26', '104,48,20', '166,96,40', '80,44,22']);
-  streaks(ctx, size, seed + 9, 48, 0.42, '96,52,24');
-  // fastener rows
-  const rnd = mulberry(seed + 3);
-  ctx.fillStyle = 'rgba(40,36,32,0.55)';
-  for (let row = 0; row < 5; row++) {
-    const y = (size / 5) * row + 8;
-    for (let i = 0; i < ribs; i += 2) {
-      ctx.beginPath();
-      ctx.arc(i * w + w * 0.5, y + rnd() * 2, 1.7, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  return c;
-}
-
-function paintAsphalt(size, seed) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  tint(ctx, size, fbm(size, seed, 6, 6), [58, 60, 62], 0.42);
-  const rnd = mulberry(seed + 11);
-  for (let i = 0; i < size * 6; i++) {
-    const x = rnd() * size, y = rnd() * size, r = rnd() * 1.4 + 0.25;
-    const v = 40 + rnd() * 110 | 0;
-    ctx.fillStyle = `rgba(${v},${v},${v - 4},${0.14 + rnd() * 0.3})`;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-  }
-  // cracks
-  ctx.strokeStyle = 'rgba(24,24,26,0.55)';
-  for (let i = 0; i < 7; i++) {
-    ctx.lineWidth = 0.6 + rnd() * 1.6;
-    ctx.beginPath();
-    let x = rnd() * size, y = rnd() * size;
-    ctx.moveTo(x, y);
-    for (let s = 0; s < 14; s++) {
-      x += (rnd() - 0.5) * 40;
-      y += (rnd() - 0.5) * 40;
-      ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-  blotches(ctx, size, seed + 17, 22, size * 0.14, ['30,30,32', '86,84,80', '52,46,38']);
-  return c;
-}
-
-function paintBrick(size, seed) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  ctx.fillStyle = '#8d8378';
-  ctx.fillRect(0, 0, size, size);
-  const rows = 16, rowH = size / rows;
-  const rnd = mulberry(seed);
-  for (let r = 0; r < rows; r++) {
-    const offset = (r % 2) * (size / 16);
-    for (let i = -1; i < 8; i++) {
-      const x = offset + i * (size / 8) + 2;
-      const y = r * rowH + 2;
-      const w = size / 8 - 4, h = rowH - 4;
-      const base = 128 + rnd() * 46;
-      ctx.fillStyle = `rgb(${base | 0},${(base * 0.93) | 0},${(base * 0.85) | 0})`;
-      ctx.fillRect(x, y, w, h);
-      ctx.fillStyle = `rgba(0,0,0,${0.05 + rnd() * 0.12})`;
-      ctx.fillRect(x, y + h - 2, w, 2);
-    }
-  }
-  const nz = fbm(size, seed + 3, 5, 4);
-  const img = ctx.getImageData(0, 0, size, size);
-  for (let i = 0, n = 0; i < img.data.length; i += 4, n++) {
-    const v = (nz[n] - 0.5) * 70;
-    img.data[i] = clamp255(img.data[i] + v);
-    img.data[i + 1] = clamp255(img.data[i + 1] + v);
-    img.data[i + 2] = clamp255(img.data[i + 2] + v);
-  }
-  ctx.putImageData(img, 0, 0);
-  streaks(ctx, size, seed + 13, 26, 0.30, '62,58,50');
-  return c;
-}
-
-function paintRoof(size, seed) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  tint(ctx, size, fbm(size, seed, 5, 5), [134, 122, 120], 0.34);
-  // shingle rows in the dusty-rose of the reference renders
-  const rows = 12, rowH = size / rows;
-  const rnd = mulberry(seed + 2);
-  for (let r = 0; r < rows; r++) {
-    for (let i = 0; i < 10; i++) {
-      const x = i * (size / 10) + (r % 2) * (size / 20);
-      const v = rnd();
-      ctx.fillStyle = `rgba(${(150 + v * 40) | 0},${(120 + v * 30) | 0},${(120 + v * 32) | 0},0.55)`;
-      ctx.fillRect(x, r * rowH, size / 10 - 1.5, rowH - 1.5);
-    }
-    ctx.fillStyle = 'rgba(40,34,34,0.30)';
-    ctx.fillRect(0, r * rowH + rowH - 2, size, 2);
-  }
-  blotches(ctx, size, seed + 6, 26, size * 0.10, ['92,74,72', '164,150,146', '120,86,66']);
-  return c;
-}
-
-function paintTankSteel(size, seed) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  tint(ctx, size, fbm(size, seed, 5, 4), [186, 188, 188], 0.24);
-  // horizontal plate seams with riveted edges
-  const bands = 6, bh = size / bands;
-  const rnd = mulberry(seed + 4);
-  for (let b = 0; b < bands; b++) {
-    const y = b * bh;
-    const g = ctx.createLinearGradient(0, y, 0, y + bh);
-    g.addColorStop(0, 'rgba(255,255,255,0.10)');
-    g.addColorStop(0.5, 'rgba(0,0,0,0.03)');
-    g.addColorStop(1, 'rgba(0,0,0,0.22)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, y, size, bh);
-    ctx.fillStyle = 'rgba(60,58,56,0.5)';
-    for (let i = 0; i < 40; i++) {
-      ctx.beginPath();
-      ctx.arc((i + 0.5) * (size / 40), y + 3, 1.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  blotches(ctx, size, seed + 8, 20, size * 0.08, ['138,74,34', '96,58,30', '150,152,148']);
-  streaks(ctx, size, seed + 12, 30, 0.28, '110,66,34');
-  void rnd;
-  return c;
-}
-
-function paintContainer(size, seed, rgb) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  tint(ctx, size, fbm(size, seed, 4, 6), rgb, 0.22);
-  const ribs = 16, w = size / ribs;
-  for (let i = 0; i < ribs; i++) {
-    const g = ctx.createLinearGradient(i * w, 0, (i + 1) * w, 0);
-    g.addColorStop(0, 'rgba(0,0,0,0.30)');
-    g.addColorStop(0.5, 'rgba(255,255,255,0.10)');
-    g.addColorStop(1, 'rgba(0,0,0,0.30)');
-    ctx.fillStyle = g;
-    ctx.fillRect(i * w, 0, w, size);
-  }
-  ctx.fillStyle = 'rgba(20,22,24,0.35)';
-  ctx.fillRect(0, 0, size, size * 0.05);
-  ctx.fillRect(0, size * 0.95, size, size * 0.05);
-  blotches(ctx, size, seed + 6, 26, size * 0.07, ['128,64,28', '92,46,22', '176,176,172']);
-  return c;
-}
-
-function paintWood(size, seed) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  const planks = 7, pw = size / planks;
-  const rnd = mulberry(seed);
-  for (let p = 0; p < planks; p++) {
-    const base = 120 + rnd() * 40;
-    ctx.fillStyle = `rgb(${base | 0},${(base * 0.76) | 0},${(base * 0.50) | 0})`;
-    ctx.fillRect(p * pw, 0, pw, size);
-    // grain
-    ctx.strokeStyle = `rgba(${(base * 0.55) | 0},${(base * 0.40) | 0},${(base * 0.26) | 0},0.45)`;
-    for (let g = 0; g < 20; g++) {
-      ctx.lineWidth = 0.4 + rnd() * 1.2;
-      ctx.beginPath();
-      const x = p * pw + rnd() * pw;
-      ctx.moveTo(x, 0);
-      for (let y = 0; y <= size; y += 24) {
-        ctx.lineTo(x + Math.sin(y * 0.03 + p) * 2.5 + (rnd() - 0.5) * 2, y);
-      }
-      ctx.stroke();
-    }
-    ctx.fillStyle = 'rgba(30,20,12,0.45)';
-    ctx.fillRect(p * pw + pw - 2, 0, 2, size);
-  }
-  blotches(ctx, size, seed + 3, 12, size * 0.08, ['74,50,28', '150,120,80']);
-  return c;
-}
-
-function paintMetalPlate(size, seed) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  tint(ctx, size, fbm(size, seed, 5, 8), [110, 114, 118], 0.30);
-  // diamond tread
-  ctx.strokeStyle = 'rgba(200,204,208,0.22)';
-  ctx.lineWidth = 3;
-  for (let i = -size; i < size * 2; i += 22) {
-    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + size, size); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(i + size, 0); ctx.lineTo(i, size); ctx.stroke();
-  }
-  blotches(ctx, size, seed + 4, 18, size * 0.07, ['128,70,32', '70,72,74']);
-  return c;
-}
-
-function paintGravel(size, seed) {
-  const c = makeCanvas(size);
-  const ctx = ctx2d(c);
-  tint(ctx, size, fbm(size, seed, 6, 8), [104, 100, 92], 0.5);
-  const rnd = mulberry(seed + 2);
-  for (let i = 0; i < size * 10; i++) {
-    const x = rnd() * size, y = rnd() * size, r = 0.6 + rnd() * 2.4;
-    const v = 70 + rnd() * 120 | 0;
-    ctx.fillStyle = `rgba(${v},${(v * 0.96) | 0},${(v * 0.86) | 0},${0.25 + rnd() * 0.5})`;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-  }
-  return c;
-}
-
-const PAINTERS = {
-  concrete:   (s) => paintConcrete(s, 101),
-  wall:       (s) => paintConcrete(s, 211),
-  asphalt:    (s) => paintAsphalt(s, 307),
-  gravel:     (s) => paintGravel(s, 401),
-  brick:      (s) => paintBrick(s, 509),
-  roof:       (s) => paintRoof(s, 601),
-  tank:       (s) => paintTankSteel(s, 701),
-  wood:       (s) => paintWood(s, 809),
-  plate:      (s) => paintMetalPlate(s, 907),
-  sidingRed:  (s) => paintCorrugated(s, 1009, [128, 74, 62]),
-  sidingBlue: (s) => paintCorrugated(s, 1103, [118, 132, 140]),
-  sidingGrey: (s) => paintCorrugated(s, 1201, [138, 140, 138]),
-  containerBlue:  (s) => paintContainer(s, 1303, [58, 96, 132]),
-  containerRust:  (s) => paintContainer(s, 1409, [128, 72, 44]),
-  containerGreen: (s) => paintContainer(s, 1511, [70, 96, 74]),
-};
-
-/**
- * Returns `{ map, normalMap }` for a named surface, cached per name+size.
- */
-export function surface(name, { size = 256, repeat = [1, 1], aniso = 4, normals = true } = {}) {
+/** Paints (or reuses) a named surface and returns its three maps. */
+export function surface(name, { size = 512, repeat = [1, 1], aniso = 4 } = {}) {
   const key = `${name}:${size}`;
   let entry = cache.get(key);
   if (!entry) {
     const painter = PAINTERS[name] || PAINTERS.concrete;
-    const albedo = painter(size);
-    entry = { albedo, normal: normals ? normalFromCanvas(albedo) : null };
+    const built = painter(size);
+    entry = {
+      albedo: built.albedo,
+      normal: normalFromHeight(built.height, size, built.normalStrength ?? 2.5),
+      rough: mapFromField(built.rough, size),
+      metalness: built.metalness ?? 0.03,
+    };
     cache.set(key, entry);
   }
-  const map = finish(entry.albedo, { repeat, aniso });
-  const normalMap = entry.normal
-    ? finish(entry.normal, { repeat, aniso, srgb: false })
-    : null;
-  return { map, normalMap };
+  return {
+    map: finish(entry.albedo, { repeat, aniso }),
+    normalMap: finish(entry.normal, { repeat, aniso, srgb: false }),
+    roughnessMap: finish(entry.rough, { repeat, aniso, srgb: false }),
+    metalness: entry.metalness,
+  };
 }
 
-/**
- * Builds a standard material for a named surface.
- */
+/** Builds a standard material for a named surface. */
 export function material(name, opts = {}) {
   const {
-    repeat = [1, 1], aniso = 4, roughness = 0.92, metalness = 0.05,
-    color = 0xffffff, normalScale = 0.8, size = 256, ...rest
+    repeat = [1, 1], aniso = 4, color = 0xffffff, normalScale = 1.0,
+    size = 512, roughness, metalness, ...rest
   } = opts;
-  const { map, normalMap } = surface(name, { size, repeat, aniso });
+  const s = surface(name, { size, repeat, aniso });
   const mat = new THREE.MeshStandardMaterial({
-    map, normalMap, roughness, metalness, color, ...rest,
+    map: s.map,
+    normalMap: s.normalMap,
+    roughnessMap: s.roughnessMap,
+    roughness: roughness ?? 1.0,
+    metalness: metalness ?? s.metalness,
+    color,
+    ...rest,
   });
-  if (normalMap) mat.normalScale = new THREE.Vector2(normalScale, normalScale);
+  mat.normalScale = new THREE.Vector2(normalScale, normalScale);
   return mat;
 }
 
 /**
- * Paints a two-script signboard: Pashto above, Latin below, on weathered steel.
- * Boards are what let a new player learn the callouts, so they are readable
- * from a long way off — big glyphs, high contrast, a stencil-style plate.
+ * A two-script signboard: Pashto above, Latin below, on a weathered steel
+ * plate. Boards are how a newcomer learns the callouts, so they stay legible
+ * from the far side of the yard.
  */
 export function signTexture(pashto, latin, accent = '#c8562f') {
   const w = 1024, h = 512;
@@ -474,16 +861,14 @@ export function signTexture(pashto, latin, accent = '#c8562f') {
   c.width = w; c.height = h;
   const ctx = ctx2d(c);
 
-  // plate
-  ctx.fillStyle = '#e8e4dc';
+  ctx.fillStyle = '#e6e2da';
   ctx.fillRect(0, 0, w, h);
-  const nz = fbm(256, 55, 5, 4);
-  const tmp = document.createElement('canvas');
-  tmp.width = tmp.height = 256;
+  const nz = fbm(256, 55, { octaves: 5, cells: 4 });
+  const tmp = makeCanvas(256);
   const tctx = ctx2d(tmp);
   const img = tctx.createImageData(256, 256);
   for (let i = 0, n = 0; i < img.data.length; i += 4, n++) {
-    const v = clamp255(215 + (nz[n] - 0.5) * 110);
+    const v = clamp255(214 + (nz[n] - 0.5) * 96);
     img.data[i] = v; img.data[i + 1] = v - 4; img.data[i + 2] = v - 12;
     img.data[i + 3] = 255;
   }
@@ -492,12 +877,10 @@ export function signTexture(pashto, latin, accent = '#c8562f') {
   ctx.drawImage(tmp, 0, 0, w, h);
   ctx.globalAlpha = 1;
 
-  // accent bands
   ctx.fillStyle = accent;
   ctx.fillRect(0, 0, w, 26);
   ctx.fillRect(0, h - 26, w, 26);
 
-  // text
   ctx.textAlign = 'center';
   ctx.fillStyle = '#1b1f24';
   ctx.font = '700 150px system-ui, "Noto Sans Arabic", sans-serif';
@@ -513,9 +896,9 @@ export function signTexture(pashto, latin, accent = '#c8562f') {
   ctx.lineWidth = 6;
   ctx.strokeRect(18, 40, w - 36, h - 80);
 
-  // weathering on top of the paint
-  blotches(ctx, w, 77, 26, 60, ['120,70,34', '90,88,80']);
-  streaks(ctx, w, 91, 22, 0.22, '80,70,56');
+  blotches(ctx, w, 77, { count: 22, radius: 60, alpha: 0.30,
+    colours: ['120,70,34', '90,88,80'] });
+  rainStreaks(ctx, w, 91, { count: 18, colour: '80,70,56', alpha: 0.22 });
 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -523,7 +906,7 @@ export function signTexture(pashto, latin, accent = '#c8562f') {
   return tex;
 }
 
-/** A soft radial sprite used for muzzle flash, smoke and blood puffs. */
+/** Soft radial sprite for muzzle flash, smoke and blood. */
 export function puffTexture(inner = '255,240,200', outer = '255,140,40') {
   const size = 128;
   const c = makeCanvas(size);
@@ -546,35 +929,46 @@ export function holeTexture() {
   const ctx = ctx2d(c);
   ctx.clearRect(0, 0, size, size);
   const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
-  g.addColorStop(0, 'rgba(10,10,10,0.95)');
-  g.addColorStop(0.35, 'rgba(40,38,36,0.55)');
+  g.addColorStop(0, 'rgba(8,8,8,0.96)');
+  g.addColorStop(0.30, 'rgba(38,36,34,0.62)');
   g.addColorStop(1, 'rgba(60,58,54,0)');
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.fill();
+  // A few radial chips so it does not read as a soft dot.
+  const rand = rng(3);
+  ctx.strokeStyle = 'rgba(24,22,20,0.55)';
+  for (let i = 0; i < 7; i++) {
+    const a = rand() * Math.PI * 2;
+    ctx.lineWidth = 0.6 + rand();
+    ctx.beginPath();
+    ctx.moveTo(32, 32);
+    ctx.lineTo(32 + Math.cos(a) * (8 + rand() * 14), 32 + Math.sin(a) * (8 + rand() * 14));
+    ctx.stroke();
+  }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
-/** Sky gradient matching the cold overcast of the reference shots. */
+/** Overcast sky, matching the cold blue of the reference renders. */
 export function skyTexture() {
   const c = makeCanvas(512);
   const ctx = ctx2d(c);
   const g = ctx.createLinearGradient(0, 0, 0, 512);
-  g.addColorStop(0.00, '#2d6ea8');
-  g.addColorStop(0.42, '#7ea9c9');
-  g.addColorStop(0.62, '#cfd8dc');
-  g.addColorStop(1.00, '#e8e2d6');
+  g.addColorStop(0.00, '#1f5c93');
+  g.addColorStop(0.34, '#4f88b4');
+  g.addColorStop(0.55, '#9fbcd0');
+  g.addColorStop(0.70, '#cfd8dc');
+  g.addColorStop(1.00, '#e4ded2');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 512, 512);
-  // thin cloud bands
-  const rnd = mulberry(19);
-  for (let i = 0; i < 30; i++) {
-    const y = rnd() * 260;
-    const h = 6 + rnd() * 26;
-    ctx.fillStyle = `rgba(255,255,255,${0.05 + rnd() * 0.14})`;
+  const rand = rng(19);
+  for (let i = 0; i < 34; i++) {
+    const y = rand() * 300;
+    const h = 5 + rand() * 26;
+    ctx.fillStyle = `rgba(255,255,255,${0.04 + rand() * 0.13})`;
     ctx.beginPath();
-    ctx.ellipse(rnd() * 512, y, 60 + rnd() * 200, h, 0, 0, Math.PI * 2);
+    ctx.ellipse(rand() * 512, y, 60 + rand() * 220, h, 0, 0, Math.PI * 2);
     ctx.fill();
   }
   const tex = new THREE.CanvasTexture(c);

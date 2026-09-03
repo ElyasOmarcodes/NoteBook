@@ -8,6 +8,7 @@ import { Hud } from './systems/hud.js';
 import { LocalPlayer } from './entities/player.js';
 import { RemotePlayer } from './entities/remote.js';
 import { Bot, BOT_NAMES } from './entities/bot.js';
+import { preloadSoldier } from './entities/soldier.js';
 import { GrenadeSystem } from './entities/grenade.js';
 import { QUALITY, COMBAT, MAP_SIZE, ANIM } from './config.js';
 
@@ -59,8 +60,15 @@ export class Game {
     Object.assign(this.settings, config.settings ?? {});
     this.quality = QUALITY[this.settings.quality] ?? QUALITY.medium;
 
-    this._progress(0.05, 'Renderer');
+    this._progress(0.03, 'Renderer');
     this._initRenderer();
+
+    // The character mesh is a real rigged model; start fetching it now so the
+    // world build overlaps the download instead of following it.
+    const soldierReady = preloadSoldier().catch((e) => {
+      console.error('soldier model failed to load', e);
+      this.bridge.send({ t: 'error', message: `model: ${e}` });
+    });
 
     this._progress(0.15, 'World');
     this.scene = new THREE.Scene();
@@ -91,7 +99,10 @@ export class Game {
     this.controls = new TouchControls(document, this.settings);
     this.controls.setLeftHanded(this.settings.leftHanded);
 
-    this._progress(0.86, 'Deploying');
+    this._progress(0.86, 'Soldiers');
+    await soldierReady;
+
+    this._progress(0.92, 'Deploying');
     this._spawnLocal(config);
 
     if (config.mode === 'training' || config.mode === 'freeroam') {
@@ -259,7 +270,7 @@ export class Game {
   _reticleOnEnemy() {
     if (!this.player?.alive) return false;
     const origin = this.player.eye.clone();
-    const dir = this.player.lookDirection();
+    const dir = this.player.aimDirection(origin);
     const target = this._traceActors(origin, dir, 90);
     return !!target;
   }

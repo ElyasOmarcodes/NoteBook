@@ -1,3 +1,5 @@
+function THREE_clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
 /**
  * Touch controls: a left thumbstick for movement, a right look pad, and a
  * cluster of action buttons.
@@ -50,7 +52,15 @@ export class TouchControls {
       const t = e.changedTouches ? e.changedTouches[0] : e;
       id = t.identifier ?? 'mouse';
       const rect = el.getBoundingClientRect();
-      origin = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      // Floating origin: wherever the thumb lands becomes the stick's centre,
+      // clamped so it stays inside the ring. The thumb never has to hunt for
+      // the middle, which is what made steering feel imprecise.
+      const r = this._radius();
+      const dx = THREE_clamp(t.clientX - cx, -r * 0.55, r * 0.55);
+      const dy = THREE_clamp(t.clientY - cy, -r * 0.55, r * 0.55);
+      origin = { x: cx + dx, y: cy + dy };
       this._updateStick(t, origin);
       e.preventDefault();
     };
@@ -84,6 +94,9 @@ export class TouchControls {
     window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'touch') end(e); });
   }
 
+  /** Below this fraction of the stick's travel, the thumb is treated as still. */
+  static get DEAD_ZONE() { return 0.14; }
+
   _updateStick(touch, origin) {
     const r = this._radius();
     let dx = touch.clientX - origin.x;
@@ -91,12 +104,30 @@ export class TouchControls {
     const len = Math.hypot(dx, dy);
     const clamped = Math.min(len, r);
     if (len > 0) { dx = (dx / len) * clamped; dy = (dy / len) * clamped; }
-    this.move.x = dx / r;
-    this.move.y = -dy / r;
-    const mag = Math.hypot(this.move.x, this.move.y);
-    // Push past 82% of the stick's travel to sprint; hold inside 35% to creep.
-    this.running = mag > 0.82;
-    this.sneaking = mag > 0.05 && mag < 0.35;
+
+    // Normalise to 0..1, then rescale past the dead zone so the very first
+    // millimetre of travel does not already mean "walk", and full deflection
+    // still means full speed. Without this the stick felt vague and the
+    // character crept whenever a thumb rested on it.
+    let mag = clamped / r;
+    const dead = TouchControls.DEAD_ZONE;
+    if (mag < dead) {
+      this.move.x = 0;
+      this.move.y = 0;
+      this.running = false;
+      this.sneaking = false;
+    } else {
+      const scaled = (mag - dead) / (1 - dead);
+      const ux = len > 0 ? dx / clamped : 0;
+      const uy = len > 0 ? dy / clamped : 0;
+      this.move.x = ux * scaled;
+      this.move.y = -uy * scaled;
+      mag = scaled;
+      // Push past 85% of the travel to sprint; hold under 40% to creep.
+      this.running = mag > 0.85;
+      this.sneaking = mag < 0.40;
+    }
+
     if (this._moveKnob) {
       this._moveKnob.style.transform = `translate(${dx}px, ${dy}px)`;
     }

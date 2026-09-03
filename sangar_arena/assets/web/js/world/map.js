@@ -1,21 +1,26 @@
 import * as THREE from '../../vendor/three.module.js';
 import { Batcher } from './batcher.js';
-import { box, cylinderUV, aabb } from './geom.js';
+import { aabb } from './geom.js';
 import { material, signTexture, skyTexture } from './textures.js';
+import {
+  place, scaleUV, gableRoof, skylight, kerb, oilTank, container,
+  drumCluster, palletStack, chainFence, chainLinkMaterial, pipeRun, smokestack,
+} from './props.js';
+import { rng } from './noise.js';
 import { DISTRICTS, MAP_SIZE } from '../config.js';
 
 const HALF = MAP_SIZE / 2;
 
 /**
- * "Sangar Chowk" — a 220 m refinery yard in four named districts.
+ * "Sangar Chowk" — a derelict refinery, built to the shape of the reference
+ * set: warehouses with corrugated flanks and pitched sheet roofs, flat-roofed
+ * plant blocks wearing rows of glazed pyramid skylights, a tank farm linked by
+ * pipe trestles, a container yard, and a kerbed asphalt road winding between
+ * them, all inside a precast concrete wall.
  *
- * The layout is deliberately readable: an asphalt ring road separates four
- * quadrants, each with its own silhouette (tank farm, warehouse row, container
- * yard, the two-storey chowk building) so a player always knows where they
- * are. Roof access is spread across four different mechanics — wooden stairs,
- * a ladder, a tank service ladder and a step-up crate route — and the roofs are
- * linked by catwalks and a pipe run that are only visible once you are up
- * there.
+ * Roof access is deliberately varied — wooden stairs, wooden and steel
+ * ladders, and a crate route you step up — and the roofs are joined by
+ * catwalks and pipe runs that do not read as routes from the ground.
  */
 export class ArenaMap {
   constructor(quality) {
@@ -23,36 +28,51 @@ export class ArenaMap {
     this.group = new THREE.Group();
     this.batcher = new Batcher();
 
-    /** Axis-aligned solid volumes. */
     this.solids = [];
-    /** Upright cylinders (oil tanks) — cheap radial collision. */
     this.cylinders = [];
-    /** Climbable volumes. */
     this.ladders = [];
-    /** Ammo crates the player can stand next to to resupply. */
     this.ammoBoxes = [];
-    /** Spawn points per team. */
     this.spawns = [[], []];
-    /** Named callouts drawn on the minimap. */
     this.places = [];
-    /** Board meshes are kept out of the batch so they can use their own map. */
-    this.signs = new THREE.Group();
+
+    /** Meshes that cannot join the opaque batch (glass, fence mesh, signs). */
+    this.extras = new THREE.Group();
+
+    this.rand = rng(20260903);
+
+    const chain = chainLinkMaterial();
+    this.fenceMat = new THREE.MeshStandardMaterial({
+      map: chain.tex, transparent: true, alphaTest: 0.35,
+      side: THREE.DoubleSide, roughness: 0.7, metalness: 0.5,
+      color: 0xb9bdc2,
+    });
+    this.glassMat = new THREE.MeshStandardMaterial({
+      color: 0xdfe8ee, roughness: 0.18, metalness: 0.0,
+      transparent: true, opacity: 0.72,
+      emissive: 0x9fb6c4, emissiveIntensity: 0.18,
+    });
+    this.windowMat = new THREE.MeshStandardMaterial({
+      color: 0x1b2228, roughness: 0.16, metalness: 0.55,
+    });
   }
 
   build() {
     this._ground();
+    this._roads();
     this._perimeter();
-    this._ringRoad();
-    this._districtSangar();
-    this._districtShamshad();
-    this._districtHindukush();
-    this._districtRubAlKhali();
+
+    this._plantBlocks();
+    this._warehouseRow();
+    this._tankFarm();
+    this._containerYard();
+    this._chowk();
+
     this._connectors();
-    this._props();
+    this._clutter();
     this._spawnPoints();
 
     this.group.add(this.batcher.build(this.quality));
-    this.group.add(this.signs);
+    this.group.add(this.extras);
     return this;
   }
 
@@ -60,577 +80,592 @@ export class ArenaMap {
   // primitives
   // =======================================================================
 
-  /**
-   * Places a textured box and (unless `solid:false`) registers its collider.
-   */
-  addBox(mat, w, h, d, x, y, z, opts = {}) {
-    const { density = 0.45, solid = true, rotY = 0, walkable = true } = opts;
-    const g = box(w, h, d, density);
-    const m = new THREE.Matrix4();
-    if (rotY) {
-      m.makeRotationY(rotY);
-      m.setPosition(x, y, z);
-    } else {
-      m.makeTranslation(x, y, z);
-    }
-    this.batcher.add(mat, g, m, {});
+  /** A textured box that also registers a collider. */
+  box(mat, w, h, d, x, y, z, opts = {}) {
+    const { ry = 0, solid = true, density = 0.3, walkable = true } = opts;
+    const g = new THREE.BoxGeometry(w, h, d);
+    scaleUV(g, Math.max(w, d) * density, h * density);
+    place(this.batcher, mat, g, { x, y, z, ry });
     g.dispose();
-    if (solid) {
-      // Rotated colliders are approximated by their axis-aligned envelope,
-      // which is fine because everything rotated here is either square in plan
-      // or a thin plank.
-      const cos = Math.abs(Math.cos(rotY)), sin = Math.abs(Math.sin(rotY));
-      const ew = w * cos + d * sin;
-      const ed = w * sin + d * cos;
-      const solidBox = aabb(x, y, z, ew, h, ed);
-      solidBox.walkable = walkable;
-      this.solids.push(solidBox);
-    }
+    if (solid) this.collide(x, y, z, w, h, d, ry, walkable);
     return this;
   }
 
-  addCylinder(mat, radius, height, x, y, z, opts = {}) {
-    const { segments = 24, density = 0.35, solid = true } = opts;
-    const g = new THREE.CylinderGeometry(radius, radius, height, segments, 1, false);
-    cylinderUV(g, radius, height, density);
-    const m = new THREE.Matrix4().makeTranslation(x, y, z);
-    this.batcher.add(mat, g, m, {});
-    g.dispose();
-    if (solid) {
-      this.cylinders.push({
-        x, z, r: radius,
-        minY: y - height / 2,
-        maxY: y + height / 2,
-      });
-    }
-    return this;
+  collide(x, y, z, w, h, d, ry = 0, walkable = true) {
+    const cos = Math.abs(Math.cos(ry)), sin = Math.abs(Math.sin(ry));
+    const b = aabb(x, y, z, w * cos + d * sin, h, w * sin + d * cos);
+    b.walkable = walkable;
+    this.solids.push(b);
+    return b;
   }
 
-  /** A ladder: two rails plus rungs, and a climb volume. */
-  addLadder(x, z, fromY, toY, facing, opts = {}) {
-    const { width = 0.78, wood = true } = opts;
-    const height = toY - fromY;
-    const midY = fromY + height / 2;
+  cylinder(x, z, r, minY, maxY) {
+    this.cylinders.push({ x, z, r, minY, maxY });
+  }
+
+  /** Wooden or steel ladder with a climb volume. */
+  addLadder(x, z, fromY, toY, facing, { wood = true, width = 0.8 } = {}) {
     const mat = wood ? 'wood' : 'plate';
-    const nx = Math.sin(facing), nz = Math.cos(facing);
-    // side rails
+    const height = toY - fromY;
     const offX = Math.cos(facing) * width / 2;
     const offZ = -Math.sin(facing) * width / 2;
-    this.addBox(mat, 0.09, height, 0.09, x + offX, midY, z + offZ, { solid: false, density: 2 });
-    this.addBox(mat, 0.09, height, 0.09, x - offX, midY, z - offZ, { solid: false, density: 2 });
-    // rungs
-    const rungs = Math.max(2, Math.floor(height / 0.32));
-    for (let i = 0; i <= rungs; i++) {
-      const y = fromY + (height * i) / rungs;
-      this.addBox(mat, width, 0.055, 0.06, x, y, z, {
-        solid: false, rotY: facing, density: 2,
+    for (const s of [1, -1]) {
+      const rail = new THREE.BoxGeometry(0.09, height, 0.09);
+      place(this.batcher, mat, rail, {
+        x: x + offX * s, y: fromY + height / 2, z: z + offZ * s,
       });
+      rail.dispose();
+    }
+    const rungs = Math.max(2, Math.floor(height / 0.31));
+    for (let i = 0; i <= rungs; i++) {
+      const rung = new THREE.CylinderGeometry(0.028, 0.028, width, 6);
+      rung.rotateZ(Math.PI / 2);
+      place(this.batcher, mat, rung, {
+        x, y: fromY + (height * i) / rungs, z, ry: facing,
+      });
+      rung.dispose();
     }
     this.ladders.push({
-      x, z, minY: fromY - 0.3, maxY: toY + 0.9,
-      radius: 0.95, nx, nz,
+      x, z, minY: fromY - 0.3, maxY: toY + 0.9, radius: 0.95,
+      nx: Math.sin(facing), nz: Math.cos(facing),
     });
-    return this;
   }
 
-  /**
-   * A run of wooden steps. `facing` is the direction you walk while climbing.
-   */
-  addStairs(x, y, z, facing, steps, opts = {}) {
-    const { width = 2.0, rise = 0.34, run = 0.42, rail = true } = opts;
+  /** A wooden stair flight with handrails. */
+  addStairs(x, y, z, facing, steps, { width = 2.0, rise = 0.34, run = 0.42 } = {}) {
     const fx = Math.sin(facing), fz = Math.cos(facing);
     for (let i = 0; i < steps; i++) {
-      const sy = y + rise * (i + 0.5);
-      const sx = x + fx * run * (i + 0.5);
-      const sz = z + fz * run * (i + 0.5);
-      this.addBox('wood', width, rise, run + 0.06, sx, sy, sz, {
-        rotY: facing, density: 1.6,
-      });
+      this.box('wood', width, rise, run + 0.06,
+        x + fx * run * (i + 0.5), y + rise * (i + 0.5), z + fz * run * (i + 0.5),
+        { ry: facing, density: 1.1 });
     }
-    if (rail) {
-      const len = run * steps;
-      const cx = x + fx * len / 2, cz = z + fz * len / 2;
-      const railY = y + rise * steps / 2 + 0.95;
-      const ox = Math.cos(facing) * width / 2, oz = -Math.sin(facing) * width / 2;
-      for (const s of [1, -1]) {
-        const g = box(0.07, 0.07, len, 1.5);
-        const m = new THREE.Matrix4();
-        m.makeRotationX(Math.atan2(rise * steps, len));
-        m.premultiply(new THREE.Matrix4().makeRotationY(facing));
-        m.setPosition(cx + ox * s, railY, cz + oz * s);
-        this.batcher.add('wood', g, m, {});
-        g.dispose();
-        // posts
-        for (let i = 0; i <= steps; i += 3) {
-          const py = y + rise * i + 0.5;
-          this.addBox('wood', 0.08, 1.0, 0.08,
-            x + fx * run * i + ox * s, py, z + fz * run * i + oz * s,
-            { solid: false, density: 2 });
-        }
+    const len = run * steps;
+    const ox = Math.cos(facing) * width / 2, oz = -Math.sin(facing) * width / 2;
+    for (const s of [1, -1]) {
+      for (let i = 0; i <= steps; i += 3) {
+        const post = new THREE.BoxGeometry(0.08, 1.0, 0.08);
+        place(this.batcher, 'wood', post, {
+          x: x + fx * run * i + ox * s, y: y + rise * i + 0.5,
+          z: z + fz * run * i + oz * s,
+        });
+        post.dispose();
       }
+      const rail = new THREE.BoxGeometry(0.07, 0.07, Math.hypot(len, rise * steps));
+      place(this.batcher, 'wood', rail, {
+        x: x + fx * len / 2 + ox * s, y: y + rise * steps / 2 + 0.95,
+        z: z + fz * len / 2 + oz * s,
+        ry: facing, rx: -Math.atan2(rise * steps, len),
+      });
+      rail.dispose();
     }
-    return this;
   }
 
-  /**
-   * A narrow plank catwalk between two roofs. These are the map's quiet
-   * shortcuts: from ground level they read as pipework.
-   */
-  addCatwalk(x1, z1, x2, z2, y, opts = {}) {
-    const { width = 0.95, rails = true, mat = 'plate' } = opts;
+  /** A narrow plank catwalk between two roofs. */
+  addCatwalk(x1, z1, x2, z2, y, { width = 0.95 } = {}) {
     const dx = x2 - x1, dz = z2 - z1;
     const len = Math.hypot(dx, dz);
     const angle = Math.atan2(dx, dz);
     const cx = (x1 + x2) / 2, cz = (z1 + z2) / 2;
-    this.addBox(mat, width, 0.12, len, cx, y, cz, { rotY: angle, density: 1.1 });
-    if (rails) {
-      const ox = Math.cos(angle) * width / 2, oz = -Math.sin(angle) * width / 2;
-      for (const s of [1, -1]) {
-        this.addBox('plate', 0.06, 0.06, len, cx + ox * s, y + 0.92, cz + oz * s,
-          { rotY: angle, solid: false, density: 1.5 });
-        const posts = Math.max(2, Math.round(len / 2.4));
-        for (let i = 0; i <= posts; i++) {
-          const t = i / posts;
-          this.addBox('plate', 0.06, 0.92, 0.06,
-            x1 + dx * t + ox * s, y + 0.46, z1 + dz * t + oz * s,
-            { solid: false, density: 2 });
-        }
+    this.box('plate', width, 0.12, len, cx, y, cz, { ry: angle, density: 0.9 });
+    const ox = Math.cos(angle) * width / 2, oz = -Math.sin(angle) * width / 2;
+    for (const s of [1, -1]) {
+      const rail = new THREE.CylinderGeometry(0.04, 0.04, len, 6);
+      rail.rotateX(Math.PI / 2);
+      place(this.batcher, 'plate', rail, {
+        x: cx + ox * s, y: y + 0.92, z: cz + oz * s, ry: angle,
+      });
+      rail.dispose();
+      const posts = Math.max(2, Math.round(len / 2.4));
+      for (let i = 0; i <= posts; i++) {
+        const t = i / posts;
+        const post = new THREE.BoxGeometry(0.055, 0.92, 0.055);
+        place(this.batcher, 'plate', post, {
+          x: x1 + dx * t + ox * s, y: y + 0.46, z: z1 + dz * t + oz * s,
+        });
+        post.dispose();
       }
     }
-    return this;
   }
 
-  /** A pipe run — decorative from below, walkable if you find the way up. */
-  addPipe(x1, z1, x2, z2, y, radius = 0.42) {
-    const dx = x2 - x1, dz = z2 - z1;
-    const len = Math.hypot(dx, dz);
-    const g = new THREE.CylinderGeometry(radius, radius, len, 12, 1);
-    cylinderUV(g, radius, len, 0.5);
-    const m = new THREE.Matrix4().makeRotationX(Math.PI / 2);
-    m.premultiply(new THREE.Matrix4().makeRotationY(Math.atan2(dx, dz)));
-    m.setPosition((x1 + x2) / 2, y, (z1 + z2) / 2);
-    this.batcher.add('tank', g, m, {});
-    g.dispose();
-    // Walkable top surface, one plank wide.
-    const b = aabb((x1 + x2) / 2, y + radius / 2, (z1 + z2) / 2,
-      Math.abs(dx) + radius * 2, radius, Math.abs(dz) + radius * 2);
-    b.walkable = true;
-    this.solids.push(b);
-    return this;
-  }
-
-  /**
-   * A signboard on two posts. Boards carry Pashto above and Latin below so a
-   * newcomer picks up the callouts in either script.
-   */
-  addSign(x, y, z, rotY, pashto, latin, colour, opts = {}) {
-    const { width = 5.2, height = 2.6, posts = true } = opts;
+  /** A bilingual signboard on posts. */
+  addSign(x, y, z, rotY, pashto, latin, colour, { width = 5.2, height = 2.6, posts = true } = {}) {
     const tex = signTexture(pashto, latin, `#${colour.toString(16).padStart(6, '0')}`);
     const mat = new THREE.MeshStandardMaterial({
-      map: tex, roughness: 0.86, metalness: 0.06,
-      side: THREE.DoubleSide,
+      map: tex, roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide,
     });
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
-    plate.position.set(x, y, z);
-    plate.rotation.y = rotY;
-    plate.castShadow = false;
-    plate.receiveShadow = true;
-    this.signs.add(plate);
-
-    // A thin backing box so the board is solid and has depth from the side.
-    // It must sit behind the plate along the board's *normal* — offsetting
-    // along the tangent instead leaves the printed face inside the box.
     const nx = Math.sin(rotY) * 0.14, nz = Math.cos(rotY) * 0.14;
-    this.addBox('plate', width, height, 0.16, x - nx, y, z - nz,
-      { rotY, density: 0.9 });
-    plate.position.set(x + nx * 0.15, y, z + nz * 0.15);
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+    plate.position.set(x + nx * 0.2, y, z + nz * 0.2);
+    plate.rotation.y = rotY;
+    plate.receiveShadow = true;
+    this.extras.add(plate);
 
+    this.box('plate', width, height, 0.16, x - nx, y, z - nz,
+      { ry: rotY, density: 0.6 });
     if (posts) {
       const ox = Math.cos(rotY) * (width / 2 - 0.4);
       const oz = -Math.sin(rotY) * (width / 2 - 0.4);
       for (const s of [1, -1]) {
-        this.addBox('plate', 0.18, y, 0.18, x + ox * s, y / 2, z + oz * s,
-          { density: 1.4 });
+        this.box('plate', 0.18, y, 0.18, x + ox * s, y / 2, z + oz * s,
+          { density: 1.0 });
       }
     }
     this.places.push({ x, z, ps: pashto, en: latin });
-    return this;
+  }
+
+  /** A row of dark glazing set into a wall. */
+  addWindows(x, y, z, w, h, rotY) {
+    const g = new THREE.PlaneGeometry(w, h);
+    const m = new THREE.Mesh(g, this.windowMat);
+    const nx = Math.sin(rotY) * 0.02, nz = Math.cos(rotY) * 0.02;
+    m.position.set(x + nx, y, z + nz);
+    m.rotation.y = rotY;
+    this.extras.add(m);
+    // Mullions.
+    const bars = Math.max(2, Math.round(w / 1.3));
+    for (let i = 1; i < bars; i++) {
+      const bx = -w / 2 + (w / bars) * i;
+      this.box('plate', 0.07, h, 0.09,
+        x + Math.cos(rotY) * bx + nx * 2, y, z - Math.sin(rotY) * bx + nz * 2,
+        { ry: rotY, solid: false, density: 1.4 });
+    }
+  }
+
+  // =======================================================================
+  // ground and roads
+  // =======================================================================
+
+  _ground() {
+    const size = MAP_SIZE + 60;
+    const g = new THREE.PlaneGeometry(size, size);
+    g.rotateX(-Math.PI / 2);
+    scaleUV(g, size * 0.18, size * 0.18);
+    const mesh = new THREE.Mesh(g, material('yard', {
+      repeat: [1, 1], aniso: Math.max(8, this.quality.aniso), normalScale: 0.7,
+    }));
+    mesh.receiveShadow = true;
+    mesh.position.y = -0.02;
+    this.group.add(mesh);
+
+    const floor = aabb(0, -1.0, 0, size, 2, size);
+    floor.walkable = true;
+    this.solids.push(floor);
+  }
+
+  /**
+   * The yard's road: an asphalt loop with a kerbed edge, laid as a strip of
+   * quads so it can bend around the plant the way the reference road does.
+   */
+  _roads() {
+    const path = [
+      [-86, -86], [-20, -86], [40, -78], [82, -52], [86, 8],
+      [70, 62], [10, 86], [-52, 84], [-86, 40], [-90, -30], [-86, -86],
+    ];
+    const width = 13;
+    const asphalt = [];
+    for (let i = 0; i < path.length - 1; i++) {
+      const [x1, z1] = path[i];
+      const [x2, z2] = path[i + 1];
+      const dx = x2 - x1, dz = z2 - z1;
+      const len = Math.hypot(dx, dz);
+      const angle = Math.atan2(dx, dz);
+      const g = new THREE.PlaneGeometry(width, len + 1.5);
+      g.rotateX(-Math.PI / 2);
+      scaleUV(g, width * 0.22, (len + 1.5) * 0.22);
+      place(this.batcher, 'asphalt', g, {
+        x: (x1 + x2) / 2, y: 0.015, z: (z1 + z2) / 2, ry: angle,
+      });
+      g.dispose();
+      asphalt.push({ x1, z1, x2, z2, angle });
+    }
+
+    // Kerbs down both sides, stepped up off the asphalt.
+    for (const seg of asphalt) {
+      const nx = Math.cos(seg.angle) * (width / 2 + 0.2);
+      const nz = -Math.sin(seg.angle) * (width / 2 + 0.2);
+      for (const s of [1, -1]) {
+        kerb(this.batcher, {
+          x1: seg.x1 + nx * s, z1: seg.z1 + nz * s,
+          x2: seg.x2 + nx * s, z2: seg.z2 + nz * s,
+        });
+      }
+    }
+
+    // A cross street through the middle of the plant.
+    for (const [ax, az, bx, bz] of [[-70, 0, 70, 0], [0, -70, 0, 70]]) {
+      const dx = bx - ax, dz = bz - az;
+      const len = Math.hypot(dx, dz);
+      const g = new THREE.PlaneGeometry(11, len);
+      g.rotateX(-Math.PI / 2);
+      scaleUV(g, 11 * 0.22, len * 0.22);
+      place(this.batcher, 'asphalt', g, {
+        x: (ax + bx) / 2, y: 0.012, z: (az + bz) / 2,
+        ry: Math.atan2(dx, dz),
+      });
+      g.dispose();
+    }
+  }
+
+  _perimeter() {
+    const wallH = 6.2, t = 0.55;
+    const sides = [
+      { x: 0, z: -HALF, w: MAP_SIZE, d: t },
+      { x: 0, z: HALF, w: MAP_SIZE, d: t },
+      { x: -HALF, z: 0, w: t, d: MAP_SIZE },
+      { x: HALF, z: 0, w: t, d: MAP_SIZE },
+    ];
+    for (const s of sides) {
+      this.box('wall', s.w, wallH, s.d, s.x, wallH / 2, s.z, { density: 0.16 });
+      // Cap rail — the precast walls in the reference all wear one.
+      this.box('concrete', s.w + 0.4, 0.38, s.d + 0.4, s.x, wallH + 0.19, s.z,
+        { solid: false, density: 0.4 });
+    }
+    for (let i = -HALF + 6; i < HALF; i += 11) {
+      for (const [x, z] of [[i, -HALF], [i, HALF], [-HALF, i], [HALF, i]]) {
+        this.box('concrete', 0.95, wallH + 0.55, 0.95, x, (wallH + 0.55) / 2, z,
+          { density: 0.55 });
+      }
+    }
+
+    const inset = HALF - 1.4;
+    this.addSign(0, 4.3, -inset, 0, DISTRICTS[0].ps, DISTRICTS[0].en,
+      DISTRICTS[0].color, { width: 9.5, height: 4.4, posts: false });
+    this.addSign(0, 4.3, inset, Math.PI, DISTRICTS[3].ps, DISTRICTS[3].en,
+      DISTRICTS[3].color, { width: 9.5, height: 4.4, posts: false });
+    this.addSign(-inset, 4.3, 0, Math.PI / 2, DISTRICTS[2].ps, DISTRICTS[2].en,
+      DISTRICTS[2].color, { width: 9.5, height: 4.4, posts: false });
+    this.addSign(inset, 4.3, 0, -Math.PI / 2, DISTRICTS[1].ps, DISTRICTS[1].en,
+      DISTRICTS[1].color, { width: 9.5, height: 4.4, posts: false });
+  }
+
+  // =======================================================================
+  // buildings
+  // =======================================================================
+
+  /**
+   * Flat-roofed plant block: block walls, a clerestory band of glazing, a
+   * concrete roof slab with a parapet, and a row of pyramid skylights.
+   */
+  plantBlock({ x, z, w, d, h, skylights = 3, wall = 'block', ladderSide = 1 }) {
+    const t = 0.5;
+    this.box(wall, w, h, t, x, h / 2, z - d / 2, { density: 0.16 });
+    this.box(wall, w, h, t, x, h / 2, z + d / 2, { density: 0.16 });
+    this.box(wall, t, h, d, x - w / 2, h / 2, z, { density: 0.16 });
+    this.box(wall, t, h, d, x + w / 2, h / 2, z, { density: 0.16 });
+
+    // Clerestory glazing near the top of the long walls.
+    const bandY = h - 1.6;
+    this.addWindows(x, bandY, z - d / 2 - 0.28, w - 3, 1.5, 0);
+    this.addWindows(x, bandY, z + d / 2 + 0.28, w - 3, 1.5, Math.PI);
+
+    // Roof slab + parapet.
+    this.box('concrete', w + 0.5, 0.35, d + 0.5, x, h + 0.17, z, { density: 0.3 });
+    const p = 1.0;
+    this.box('concrete', w + 0.5, p, 0.3, x, h + 0.35 + p / 2, z - d / 2 - 0.1, { density: 0.6 });
+    this.box('concrete', w + 0.5, p, 0.3, x, h + 0.35 + p / 2, z + d / 2 + 0.1, { density: 0.6 });
+    this.box('concrete', 0.3, p, d + 0.5, x - w / 2 - 0.1, h + 0.35 + p / 2, z, { density: 0.6 });
+    this.box('concrete', 0.3, p, d + 0.5, x + w / 2 + 0.1, h + 0.35 + p / 2, z, { density: 0.6 });
+
+    // Skylights: the row of glazed pyramids that identifies these roofs.
+    const spacing = (w - 4) / Math.max(1, skylights);
+    for (let i = 0; i < skylights; i++) {
+      const sx = x - (w - 4) / 2 + spacing * (i + 0.5);
+      // Kerb the skylight sits on.
+      this.box('concrete', 3.0, 0.45, 3.0, sx, h + 0.55, z, { density: 0.6 });
+      skylight(this.extras, { x: sx, y: h + 0.78, z, w: 3.0, h: 1.0, mat: this.glassMat });
+    }
+
+    // Roof plant: a vent stack and a housing for cover.
+    this.box('plate', 2.2, 1.1, 1.8, x + w / 4, h + 0.9, z - d / 4, { density: 0.8 });
+    const vent = new THREE.CylinderGeometry(0.42, 0.42, 1.5, 12);
+    place(this.batcher, 'plate', vent, { x: x - w / 4, y: h + 1.1, z: z + d / 4 });
+    vent.dispose();
+    this.cylinder(x - w / 4, z + d / 4, 0.42, h + 0.35, h + 1.85);
+
+    if (ladderSide) {
+      this.addLadder(x + ladderSide * (w / 2 + 0.35), z + 2, 0, h + 1.4,
+        ladderSide > 0 ? -Math.PI / 2 : Math.PI / 2, { wood: false });
+    }
+    return h;
+  }
+
+  /**
+   * Warehouse: corrugated flanks, a pitched sheet roof with eaves, a roll-up
+   * door, and a walkable deck at eave height.
+   */
+  warehouse({ x, z, w, d, h, wall = 'sidingGrey', roof = 'roof', rise = 2.6, doorEnd = -1 }) {
+    const t = 0.4;
+    this.box(wall, w, h, t, x, h / 2, z - d / 2, { density: 0.2 });
+    this.box(wall, w, h, t, x, h / 2, z + d / 2, { density: 0.2 });
+    this.box(wall, t, h, d, x - w / 2, h / 2, z, { density: 0.2 });
+    this.box(wall, t, h, d, x + w / 2, h / 2, z, { density: 0.2 });
+
+    // Walkable deck at eave height, then the pitched roof on top of it.
+    this.box('roof', w + 0.9, 0.28, d + 0.9, x, h + 0.14, z,
+      { density: 0.3, walkable: true });
+    gableRoof(this.batcher, { x, y: h + 0.28, z, w, d, rise, mat: roof });
+
+    // Eave fascia.
+    for (const s of [-1, 1]) {
+      this.box('plate', w + 1.2, 0.22, 0.28, x, h + 0.05, z + s * (d / 2 + 0.55),
+        { solid: false, density: 1.0 });
+    }
+
+    // Roll-up door in the gable end.
+    const dz = doorEnd * (d / 2 + 0.24);
+    this.box('plate', 4.6, 4.2, 0.14, x, 2.1, z + dz, { solid: false, density: 0.7 });
+    for (const sign of [-1, 1]) {
+      this.box('plate', 0.16, 5.6, 0.1, x + sign * 2.4, 2.6, z + dz * 1.02,
+        { solid: false, density: 1.2 });
+    }
+    // Windows either side of the door.
+    this.addWindows(x - 6.5, 3.4, z + dz, 3.0, 1.2, doorEnd > 0 ? Math.PI : 0);
+    this.addWindows(x + 6.5, 3.4, z + dz, 3.0, 1.2, doorEnd > 0 ? Math.PI : 0);
+    // Long-wall window band.
+    this.addWindows(x, h - 1.3, z - d / 2 - 0.24, w - 6, 1.1, 0);
+  }
+
+  /** A small site office on stilts, white siding with an orange trim. */
+  officeHut({ x, z, w = 7, d = 5, h = 3.2, stilt = 1.4 }) {
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        this.box('plate', 0.2, stilt, 0.2,
+          x + sx * (w / 2 - 0.4), stilt / 2, z + sz * (d / 2 - 0.4), { density: 1.4 });
+      }
+    }
+    this.box('plate', w, 0.22, d, x, stilt + 0.11, z, { density: 0.6 });
+    const y0 = stilt + 0.22;
+    this.box('sidingWhite', w, h, 0.28, x, y0 + h / 2, z - d / 2, { density: 0.35 });
+    this.box('sidingWhite', w, h, 0.28, x, y0 + h / 2, z + d / 2, { density: 0.35 });
+    this.box('sidingWhite', 0.28, h, d, x - w / 2, y0 + h / 2, z, { density: 0.35 });
+    this.box('sidingWhite', 0.28, h, d, x + w / 2, y0 + h / 2, z, { density: 0.35 });
+    this.box('roofBlue', w + 0.7, 0.2, d + 0.7, x, y0 + h + 0.1, z, { density: 0.4 });
+    // Orange fascia trim.
+    for (const s of [-1, 1]) {
+      this.box('containerRust', w + 0.7, 0.24, 0.16, x, y0 + h - 0.02,
+        z + s * (d / 2 + 0.32), { solid: false, density: 1.0 });
+    }
+    this.addWindows(x, y0 + h * 0.6, z - d / 2 - 0.16, w - 2.2, 1.3, 0);
+    this.addStairs(x + w / 2 + 0.4, 0, z, -Math.PI / 2, 5, { width: 1.2, rise: 0.3, run: 0.34 });
   }
 
   // =======================================================================
   // districts
   // =======================================================================
 
-  _ground() {
-    const g = new THREE.PlaneGeometry(MAP_SIZE + 40, MAP_SIZE + 40, 1, 1);
-    g.rotateX(-Math.PI / 2);
-    const uv = g.attributes.uv;
-    for (let i = 0; i < uv.count; i++) {
-      uv.setXY(i, uv.getX(i) * 130, uv.getY(i) * 130);
-    }
-    const mesh = new THREE.Mesh(g, material('gravel', {
-      repeat: [1, 1], aniso: this.quality.aniso, roughness: 0.98,
-    }));
-    mesh.receiveShadow = true;
-    mesh.position.y = -0.02;
-    this.group.add(mesh);
+  /** North-west: the plant blocks with their skylight rows. */
+  _plantBlocks() {
+    this.plantBlock({ x: -58, z: -58, w: 30, d: 18, h: 9.5, skylights: 3, ladderSide: 1 });
+    this.plantBlock({ x: -58, z: -30, w: 24, d: 14, h: 7.0, skylights: 2, ladderSide: -1 });
+    this.plantBlock({ x: -22, z: -62, w: 20, d: 16, h: 11.5, skylights: 2, ladderSide: -1 });
+    smokestack(this.batcher, { x: -8, z: -74, h: 27, r: 1.15 });
+    this.cylinder(-8, -74, 1.15, 0, 27);
+    smokestack(this.batcher, { x: -3, z: -74, h: 24, r: 1.0 });
+    this.cylinder(-3, -74, 1.0, 0, 24);
 
-    const floor = aabb(0, -1.0, 0, MAP_SIZE + 40, 2, MAP_SIZE + 40);
-    floor.walkable = true;
-    this.solids.push(floor);
+    this.officeHut({ x: -36, z: -34 });
+    this.addSign(-46, 3.1, -18, 0, DISTRICTS[0].ps, DISTRICTS[0].en, DISTRICTS[0].color);
+    this.places.push({ x: -52, z: -50, ps: DISTRICTS[0].ps, en: DISTRICTS[0].en });
   }
 
-  _perimeter() {
-    const wallH = 6.5, t = 0.7;
-    const sides = [
-      { x: 0, z: -HALF, w: MAP_SIZE, d: t, rot: 0 },
-      { x: 0, z: HALF, w: MAP_SIZE, d: t, rot: 0 },
-      { x: -HALF, z: 0, w: t, d: MAP_SIZE, rot: 0 },
-      { x: HALF, z: 0, w: t, d: MAP_SIZE, rot: 0 },
-    ];
-    for (const s of sides) {
-      this.addBox('wall', s.w, wallH, s.d, s.x, wallH / 2, s.z, { density: 0.35 });
-      // capping course
-      this.addBox('concrete', s.w + 0.3, 0.34, s.d + 0.3, s.x, wallH + 0.17, s.z,
-        { density: 0.6, solid: false });
-    }
-    // pilasters every 12 m for the precast look of the reference shots
-    for (let i = -HALF + 6; i < HALF; i += 12) {
-      this.addBox('concrete', 1.0, wallH + 0.5, 1.0, i, (wallH + 0.5) / 2, -HALF, { density: 0.7 });
-      this.addBox('concrete', 1.0, wallH + 0.5, 1.0, i, (wallH + 0.5) / 2, HALF, { density: 0.7 });
-      this.addBox('concrete', 1.0, wallH + 0.5, 1.0, -HALF, (wallH + 0.5) / 2, i, { density: 0.7 });
-      this.addBox('concrete', 1.0, wallH + 0.5, 1.0, HALF, (wallH + 0.5) / 2, i, { density: 0.7 });
-    }
+  /** North-east: the warehouse row. */
+  _warehouseRow() {
+    this.warehouse({ x: 54, z: -62, w: 34, d: 16, h: 7.4, wall: 'sidingRed', roof: 'roofRed', doorEnd: -1 });
+    this.warehouse({ x: 54, z: -36, w: 34, d: 16, h: 7.4, wall: 'sidingGrey', roof: 'roof', doorEnd: 1 });
+    this.warehouse({ x: 24, z: -30, w: 16, d: 26, h: 6.4, wall: 'sidingBlue', roof: 'roofBlue', doorEnd: 1 });
 
-    // One large board on the inner face of each perimeter wall.
-    const inset = HALF - 1.6;
-    this.addSign(0, 4.2, -inset, 0, DISTRICTS[0].ps, DISTRICTS[0].en, DISTRICTS[0].color,
-      { width: 9, height: 4.2, posts: false });
-    this.addSign(0, 4.2, inset, Math.PI, DISTRICTS[3].ps, DISTRICTS[3].en, DISTRICTS[3].color,
-      { width: 9, height: 4.2, posts: false });
-    this.addSign(-inset, 4.2, 0, Math.PI / 2, DISTRICTS[2].ps, DISTRICTS[2].en, DISTRICTS[2].color,
-      { width: 9, height: 4.2, posts: false });
-    this.addSign(inset, 4.2, 0, -Math.PI / 2, DISTRICTS[1].ps, DISTRICTS[1].en, DISTRICTS[1].color,
-      { width: 9, height: 4.2, posts: false });
+    // Wooden stair up to the northern warehouse deck, with a landing.
+    this.addStairs(30, 0, -70, 0, 22, { width: 2.2 });
+    this.box('wood', 3.2, 0.16, 3.2, 30, 7.5, -61.5, { density: 0.9 });
+
+    this.plantBlock({ x: 80, z: -30, w: 18, d: 22, h: 8.2, skylights: 2, ladderSide: -1, wall: 'block' });
+
+    this.addSign(40, 3.1, -14, 0, DISTRICTS[1].ps, DISTRICTS[1].en, DISTRICTS[1].color);
+    this.places.push({ x: 54, z: -48, ps: DISTRICTS[1].ps, en: DISTRICTS[1].en });
   }
 
-  _ringRoad() {
-    // A wide asphalt ring plus two cross streets, laid just above the gravel.
-    const roadY = 0.02;
-    const w = 14;
-    const addRoad = (x, z, sw, sd) => {
-      const g = new THREE.PlaneGeometry(sw, sd);
-      g.rotateX(-Math.PI / 2);
-      const uv = g.attributes.uv;
-      for (let i = 0; i < uv.count; i++) {
-        uv.setXY(i, uv.getX(i) * sw * 0.25, uv.getY(i) * sd * 0.25);
-      }
-      const m = new THREE.Matrix4().makeTranslation(x, roadY, z);
-      this.batcher.add('asphalt', g, m, {});
-      g.dispose();
-    };
-    addRoad(0, -62, MAP_SIZE - 24, w);
-    addRoad(0, 62, MAP_SIZE - 24, w);
-    addRoad(-62, 0, w, MAP_SIZE - 24);
-    addRoad(62, 0, w, MAP_SIZE - 24);
-    addRoad(0, 0, MAP_SIZE - 24, w);   // central east-west street
-    addRoad(0, 0, w, MAP_SIZE - 24);   // central north-south street
-  }
-
-  /** North-west: the chowk itself — a two-storey block and open square. */
-  _districtSangar() {
-    const cx = -52, cz = -52;
-
-    // Two-storey command block with a walkable roof (the map's best vantage).
-    this._building({
-      x: cx, z: cz, w: 26, d: 18, h: 9.2,
-      wall: 'brick', roof: 'concrete', parapet: 1.1,
-      windows: true,
-    });
-    // Ladder up the east face.
-    this.addLadder(cx + 13.4, cz + 4, 0, 9.2, -Math.PI / 2);
-    // Second, quieter ladder tucked behind the block.
-    this.addLadder(cx - 13.4, cz - 5.5, 0, 9.2, Math.PI / 2);
-
-    // Lower annex you can step onto from the crates, then hop to the block.
-    this._building({
-      x: cx + 20, z: cz + 15, w: 12, d: 10, h: 4.4,
-      wall: 'sidingBlue', roof: 'plate', parapet: 0.5,
-    });
-    // Crate ladder of opportunity: 0.9 -> 1.8 -> 2.7 -> annex roof.
-    this._crateSteps(cx + 26.5, cz + 21.5, 0);
-
-    // Sandbag sangars around the square.
-    this._sangarNest(cx + 6, cz + 26, 0);
-    this._sangarNest(cx - 20, cz + 20, Math.PI / 4);
-    this._sangarNest(cx + 24, cz - 18, -Math.PI / 3);
-
-    this.addSign(cx, 3.0, cz + 26, 0, DISTRICTS[0].ps, DISTRICTS[0].en, DISTRICTS[0].color);
-    this.places.push({ x: cx, z: cz, ps: DISTRICTS[0].ps, en: DISTRICTS[0].en });
-  }
-
-  /** North-east: the warehouse row with wooden stairs to the long roof. */
-  _districtShamshad() {
-    const cx = 54, cz = -50;
-
-    this._warehouse({ x: cx, z: cz - 16, w: 34, d: 16, h: 7.6, ridge: 2.4, wall: 'sidingRed' });
-    this._warehouse({ x: cx, z: cz + 12, w: 34, d: 16, h: 7.6, ridge: 2.4, wall: 'sidingGrey' });
-
-    // Wooden stair flight up to the northern warehouse roof.
-    this.addStairs(cx - 21, 0, cz - 22, 0, 22, { width: 2.2 });
-    // Landing that meets the eave.
-    this.addBox('wood', 3.0, 0.16, 3.0, cx - 21, 7.6, cz - 13.6, { density: 1.4 });
-    this.addBox('wood', 3.0, 0.9, 0.1, cx - 21, 8.1, cz - 15.0, { solid: false, density: 2 });
-
-    // Ladder linking the two warehouse roofs by way of a low store.
-    this._building({ x: cx + 22, z: cz, w: 10, d: 12, h: 4.6, wall: 'sidingBlue', roof: 'plate', parapet: 0.4 });
-    this.addLadder(cx + 22, cz - 6.4, 0, 4.6, 0);
-
-    this.addSign(cx - 4, 3.0, cz + 26, 0, DISTRICTS[1].ps, DISTRICTS[1].en, DISTRICTS[1].color);
-    this.places.push({ x: cx, z: cz, ps: DISTRICTS[1].ps, en: DISTRICTS[1].en });
-  }
-
-  /** South-west: the tank farm. Tall, round cover and a service ladder. */
-  _districtHindukush() {
-    const cx = -54, cz = 50;
+  /** South-west: the tank farm. */
+  _tankFarm() {
     const tanks = [
-      { x: cx - 16, z: cz - 14, r: 8.5, h: 12 },
-      { x: cx + 6, z: cz - 16, r: 8.5, h: 12 },
-      { x: cx - 14, z: cz + 10, r: 10, h: 14.5 },
-      { x: cx + 10, z: cz + 8, r: 7, h: 10 },
+      { x: -64, z: 34, r: 9.0, h: 12.5 },
+      { x: -40, z: 30, r: 9.0, h: 12.5 },
+      { x: -62, z: 60, r: 10.5, h: 15.0 },
+      { x: -34, z: 58, r: 7.5, h: 10.5 },
     ];
     for (const t of tanks) {
-      this.addCylinder('tank', t.r, t.h, t.x, t.h / 2, t.z, { segments: 28 });
-      // walkable lid + guard rail
-      this.addCylinder('plate', t.r + 0.25, 0.4, t.x, t.h + 0.2, t.z,
-        { segments: 28, solid: false });
-      const lid = aabb(t.x, t.h + 0.2, t.z, (t.r + 0.25) * 2, 0.4, (t.r + 0.25) * 2);
+      oilTank(this.batcher, this.extras, t);
+      this.cylinder(t.x, t.z, t.r, 0, t.h);
+      const lid = aabb(t.x, t.h + 0.3, t.z, (t.r + 0.12) * 2, 0.6, (t.r + 0.12) * 2);
       lid.walkable = true;
-      lid.round = { x: t.x, z: t.z, r: t.r + 0.25 };
+      lid.round = { x: t.x, z: t.z, r: t.r + 0.12 };
       this.solids.push(lid);
-      for (let a = 0; a < 16; a++) {
-        const ang = (a / 16) * Math.PI * 2;
-        this.addBox('plate', 0.07, 1.0, 0.07,
-          t.x + Math.cos(ang) * t.r, t.h + 0.9, t.z + Math.sin(ang) * t.r,
-          { solid: false, density: 2 });
-      }
-      // connecting pipework at the base
-      this.addPipe(t.x, t.z, t.x + 6, t.z, 1.6, 0.34);
     }
     // Service ladder up the biggest tank.
     const big = tanks[2];
-    this.addLadder(big.x, big.z + big.r + 0.15, 0, big.h + 0.4, 0, { wood: false });
-    // High pipe bridge between two tank lids — a quiet flank for anyone who
-    // notices it from the roofs.
-    this.addPipe(tanks[0].x, tanks[0].z, tanks[2].x, tanks[2].z, 12.3, 0.5);
-    this.addCatwalk(tanks[2].x, tanks[2].z + 2, tanks[3].x, tanks[3].z - 2, 12.4,
-      { width: 0.9 });
+    this.addLadder(big.x, big.z + big.r + 0.12, 0, big.h + 0.6, 0, { wood: false });
 
-    this.addSign(cx + 2, 3.0, cz - 30, Math.PI, DISTRICTS[2].ps, DISTRICTS[2].en, DISTRICTS[2].color);
-    this.places.push({ x: cx, z: cz, ps: DISTRICTS[2].ps, en: DISTRICTS[2].en });
+    // Trestle pipe runs, low enough to duck under and high enough to shelter.
+    pipeRun(this.batcher, { x1: -74, z1: 20, x2: -20, z2: 20, y: 4.2, r: 0.48 });
+    pipeRun(this.batcher, { x1: -74, z1: 23, x2: -20, z2: 23, y: 3.4, r: 0.34 });
+    this.collide(-47, 4.2, 20, 54, 0.5, 1.2, 0, true);
+
+    // A high pipe joining two tank lids: the quiet flank route.
+    pipeRun(this.batcher, {
+      x1: tanks[0].x, z1: tanks[0].z, x2: tanks[2].x, z2: tanks[2].z,
+      y: 12.8, r: 0.55, supports: false,
+    });
+    this.collide((tanks[0].x + tanks[2].x) / 2, 13.1, (tanks[0].z + tanks[2].z) / 2,
+      1.4, 0.4, Math.abs(tanks[2].z - tanks[0].z) + 2, 0, true);
+
+    this.addSign(-40, 3.1, 12, Math.PI, DISTRICTS[2].ps, DISTRICTS[2].en, DISTRICTS[2].color);
+    this.places.push({ x: -52, z: 44, ps: DISTRICTS[2].ps, en: DISTRICTS[2].en });
   }
 
-  /** South-east: stacked containers, a maze at ground level. */
-  _districtRubAlKhali() {
-    const cx = 52, cz = 52;
+  /** South-east: the container yard. */
+  _containerYard() {
     const mats = ['containerBlue', 'containerRust', 'containerGreen'];
     const layout = [
-      [-18, -16, 0, 2], [-6, -16, 0, 1], [6, -18, Math.PI / 2, 2],
-      [-20, 0, Math.PI / 2, 1], [-4, 2, 0, 3], [12, 0, 0, 2],
-      [-16, 16, 0, 2], [0, 18, Math.PI / 2, 1], [16, 16, 0, 1],
-      [20, -6, Math.PI / 2, 2],
+      [34, 30, 0, 2], [34, 34, 0, 1], [50, 26, Math.PI / 2, 2],
+      [62, 40, 0, 3], [40, 52, Math.PI / 2, 1], [58, 62, 0, 2],
+      [30, 66, 0, 1], [74, 30, Math.PI / 2, 2], [72, 68, 0, 1],
     ];
     let n = 0;
-    for (const [ox, oz, rot, stack] of layout) {
+    for (const [cx, cz, ry, stack] of layout) {
       for (let s = 0; s < stack; s++) {
-        this.addBox(mats[n % 3], 12.2, 2.9, 2.9,
-          cx + ox, 1.45 + s * 2.95, cz + oz, { rotY: rot, density: 0.55 });
+        const y = s * 2.62;
+        container(this.batcher, {
+          x: cx, y, z: cz, ry, mat: mats[n % 3],
+        });
+        const cos = Math.abs(Math.cos(ry)), sin = Math.abs(Math.sin(ry));
+        this.collide(cx, y + 1.3, cz,
+          12.2 * cos + 2.44 * sin, 2.59, 12.2 * sin + 2.44 * cos, 0, true);
         n++;
       }
     }
-    // Step-up route: pallet -> crate -> single container -> double stack.
-    this._crateSteps(cx - 9, cz - 12, 0);
+    // The step-up route: crates rising a uniform 0.42 m onto the stacks.
+    this._crateSteps(22, 30, 0);
+    this.addLadder(62, 46.5, 0, 8.0, Math.PI, { wood: false });
+    this.addCatwalk(62, 44, 58, 34, 7.95, { width: 0.95 });
 
-    // Hidden ladder behind the tallest stack, only visible from the alley.
-    this.addLadder(cx - 4, cz + 4.0, 0, 8.85, Math.PI);
-
-    // Catwalk from the container tops toward the warehouse row.
-    this.addCatwalk(cx - 4, cz - 1, cx - 4, cz - 14, 8.9, { width: 0.9 });
-
-    this.addSign(cx - 6, 3.0, cz - 30, Math.PI, DISTRICTS[3].ps, DISTRICTS[3].en, DISTRICTS[3].color);
-    this.places.push({ x: cx, z: cz, ps: DISTRICTS[3].ps, en: DISTRICTS[3].en });
+    this.addSign(30, 3.1, 14, Math.PI, DISTRICTS[3].ps, DISTRICTS[3].en, DISTRICTS[3].color);
+    this.places.push({ x: 52, z: 46, ps: DISTRICTS[3].ps, en: DISTRICTS[3].en });
   }
 
-  /** Cross-map links between the four districts' high ground. */
-  _connectors() {
-    // Chowk block roof -> warehouse roof, over the north street.
-    this.addCatwalk(-39, -48, 37, -66, 8.6, { width: 1.0 });
-    // Warehouse roof -> container tops, over the east street.
-    this.addCatwalk(60, -34, 56, 36, 8.2, { width: 0.95 });
-    // Tank lid -> chowk annex roof, the longest and most exposed crossing.
-    this.addPipe(-58, 40, -40, -30, 5.4, 0.45);
-
-    // Central watchtower: the one piece of ground that sees every district.
-    const tx = 0, tz = 0;
+  /** The chowk itself: the open crossing at the centre of the plant. */
+  _chowk() {
+    // Watchtower over the crossroads.
+    const tx = 0, tz = 0, th = 11;
     for (let i = 0; i < 4; i++) {
-      const ang = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      this.addBox('plate', 0.4, 11, 0.4,
-        tx + Math.cos(ang) * 2.4, 5.5, tz + Math.sin(ang) * 2.4, { density: 1.2 });
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      this.box('plate', 0.38, th, 0.38,
+        tx + Math.cos(a) * 2.5, th / 2, tz + Math.sin(a) * 2.5, { density: 1.0 });
     }
-    this.addBox('plate', 6.4, 0.3, 6.4, tx, 11.1, tz, { density: 0.9 });
+    this.box('plate', 6.6, 0.3, 6.6, tx, th + 0.15, tz, { density: 0.6 });
     for (let i = 0; i < 4; i++) {
-      const ang = (i / 4) * Math.PI * 2;
-      this.addBox('plate', 6.4, 1.1, 0.14,
-        tx + Math.sin(ang) * 3.1, 11.8, tz + Math.cos(ang) * 3.1,
-        { rotY: ang, solid: false, density: 1.4 });
+      const a = (i / 4) * Math.PI * 2;
+      this.box('plate', 6.6, 1.15, 0.14,
+        tx + Math.sin(a) * 3.2, th + 0.9, tz + Math.cos(a) * 3.2,
+        { ry: a, solid: false, density: 1.0 });
     }
-    this.addLadder(tx + 2.9, tz, 0, 11.4, -Math.PI / 2, { wood: false });
+    this.box('roofBlue', 7.4, 0.18, 7.4, tx, th + 2.3, tz, { solid: false, density: 0.5 });
+    this.addLadder(tx + 3.0, tz, 0, th + 0.5, -Math.PI / 2, { wood: false });
     this.places.push({ x: 0, z: 0, ps: 'مرکزي برج', en: 'TOWER' });
-  }
 
-  _props() {
-    const rnd = mulberry(4242);
-    // Barrels, crates and pallets scattered along the roads for low cover.
-    for (let i = 0; i < 90; i++) {
-      const x = (rnd() - 0.5) * (MAP_SIZE - 30);
-      const z = (rnd() - 0.5) * (MAP_SIZE - 30);
-      if (Math.hypot(x, z) < 9) continue;
-      const kind = rnd();
-      if (kind < 0.34) {
-        this.addCylinder('containerRust', 0.34, 0.94, x, 0.47, z,
-          { segments: 12, density: 0.9 });
-      } else if (kind < 0.72) {
-        const s = 0.85 + rnd() * 0.5;
-        this.addBox('wood', s, s, s, x, s / 2, z,
-          { rotY: rnd() * Math.PI, density: 1.5 });
-      } else {
-        this.addBox('wood', 1.2, 0.18, 1.0, x, 0.09, z,
-          { rotY: rnd() * Math.PI, density: 1.8 });
-      }
-    }
-
-    // Ammo crates: standing next to one refills your reserve.
-    const ammoSpots = [
-      [-52, -30], [52, -28], [-52, 28], [52, 30],
-      [0, -30], [0, 30], [-30, 0], [30, 0], [0, 6],
-    ];
-    for (const [x, z] of ammoSpots) {
-      this.addBox('containerGreen', 1.4, 0.8, 0.9, x, 0.4, z, { density: 1.2 });
-      this.addBox('containerGreen', 1.2, 0.14, 0.75, x, 0.87, z,
-        { solid: false, density: 1.4 });
-      this.ammoBoxes.push({ x, y: 0.8, z, radius: 2.2 });
-    }
-  }
-
-  /** A low sandbag position — the "sangar" the map is named for. */
-  _sangarNest(x, z, rot) {
-    const rows = 3;
-    for (let r = 0; r < rows; r++) {
-      const y = 0.22 + r * 0.42;
-      const span = 4.4 - r * 0.3;
-      this.addBox('gravel', span, 0.42, 0.55, x, y, z - 1.6,
-        { rotY: rot, density: 1.1 });
-      this.addBox('gravel', 0.55, 0.42, 3.0, x - span / 2 + 0.3, y, z - 0.2,
-        { rotY: rot, density: 1.1 });
-      this.addBox('gravel', 0.55, 0.42, 3.0, x + span / 2 - 0.3, y, z - 0.2,
-        { rotY: rot, density: 1.1 });
-    }
+    // Fenced compound around the crossing.
+    chainFence(this.batcher, this.extras, { x1: -16, z1: -13, x2: 16, z2: -13, mesh: this.fenceMat });
+    this.collide(0, 1.2, -13, 32, 2.4, 0.4, 0, false);
+    chainFence(this.batcher, this.extras, { x1: -16, z1: 13, x2: 16, z2: 13, mesh: this.fenceMat });
+    this.collide(0, 1.2, 13, 32, 2.4, 0.4, 0, false);
   }
 
   /**
-   * Pallet -> crate -> crate: the manual step-up route onto a roof.
+   * The step-up route onto the container stacks.
    *
-   * Each box is exactly `rise` taller than the one before, and `rise` is kept
-   * under PHYS.stepHeight — otherwise the sweep refuses to mount the next
-   * crate and the whole route is decorative. The top lands level with a
-   * shipping container, so the run continues onto the stacks.
+   * Every crate rises a uniform 0.42 m — under PHYS.stepHeight — and they are
+   * spaced wider than they are deep and left unrotated. Rotating them looked
+   * more casual but grew each collider's axis-aligned envelope until the boxes
+   * overlapped, and the sweep then hit the side of the next crate instead of
+   * mounting it: the player stalled three crates up.
    */
   _crateSteps(x, z, rot) {
     const fx = Math.sin(rot), fz = Math.cos(rot);
     const rise = 0.42;
-    const count = 7;
-    for (let i = 0; i < count; i++) {
+    // Slightly closer than the crates are wide, so consecutive tops overlap
+    // and there is no gap for the player to drop into mid-climb.
+    const spacing = 1.05;
+    for (let i = 0; i < 7; i++) {
       const h = rise * (i + 1);
-      const size = 1.3 - i * 0.05;
-      this.addBox('wood', size, h, size,
-        x + fx * i * 1.05, h / 2, z + fz * i * 1.05,
-        { rotY: rot + i * 0.12, density: 1.5 });
+      const size = 1.15;
+      this.box('wood', size, h, size,
+        x + fx * i * spacing, h / 2, z + fz * i * spacing,
+        { ry: rot, density: 1.2 });
     }
   }
 
-  /** Flat-roofed block with an optional parapet you can crouch behind. */
-  _building({ x, z, w, d, h, wall, roof, parapet = 0, windows = false }) {
-    const t = 0.45;
-    this.addBox(wall, w, h, t, x, h / 2, z - d / 2, { density: 0.4 });
-    this.addBox(wall, w, h, t, x, h / 2, z + d / 2, { density: 0.4 });
-    this.addBox(wall, t, h, d, x - w / 2, h / 2, z, { density: 0.4 });
-    this.addBox(wall, t, h, d, x + w / 2, h / 2, z, { density: 0.4 });
-    // roof slab
-    this.addBox(roof, w + 0.4, 0.35, d + 0.4, x, h + 0.17, z, { density: 0.5 });
-    if (parapet > 0) {
-      const p = parapet;
-      this.addBox('concrete', w + 0.4, p, 0.28, x, h + 0.35 + p / 2, z - d / 2 - 0.06, { density: 0.9 });
-      this.addBox('concrete', w + 0.4, p, 0.28, x, h + 0.35 + p / 2, z + d / 2 + 0.06, { density: 0.9 });
-      this.addBox('concrete', 0.28, p, d + 0.4, x - w / 2 - 0.06, h + 0.35 + p / 2, z, { density: 0.9 });
-      this.addBox('concrete', 0.28, p, d + 0.4, x + w / 2 + 0.06, h + 0.35 + p / 2, z, { density: 0.9 });
-    }
-    if (windows) {
-      // Dark recessed strips: cheap, and they read as glazing at distance.
-      for (let f = 0; f < Math.max(1, Math.floor(h / 4)); f++) {
-        const wy = 2.2 + f * 3.6;
-        if (wy > h - 1) break;
-        this.addBox('plate', w - 3, 1.1, 0.12, x, wy, z - d / 2 - 0.24,
-          { solid: false, density: 1.0 });
-        this.addBox('plate', w - 3, 1.1, 0.12, x, wy, z + d / 2 + 0.24,
-          { solid: false, density: 1.0 });
-      }
-    }
-    // rooftop clutter for cover
-    this.addBox('plate', 2.4, 1.2, 2.0, x + w / 4, h + 0.95, z - d / 4, { density: 1.0 });
-    this.addCylinder('plate', 0.8, 1.6, x - w / 4, h + 1.15, z + d / 4,
-      { segments: 12, density: 0.8 });
+  _connectors() {
+    // Plant roof -> warehouse deck, over the north street.
+    this.addCatwalk(-43, -58, 37, -62, 9.2, { width: 1.0 });
+    // Warehouse deck -> container tops, over the east street.
+    this.addCatwalk(60, -28, 62, 22, 7.9, { width: 0.95 });
+    // Tank lid -> plant roof, the longest and most exposed crossing.
+    this.addCatwalk(-62, 48, -58, -20, 12.0, { width: 0.9 });
   }
 
-  /** Gable-roofed shed, the silhouette that dominates the reference shots. */
-  _warehouse({ x, z, w, d, h, ridge, wall }) {
-    const t = 0.4;
-    this.addBox(wall, w, h, t, x, h / 2, z - d / 2, { density: 0.35 });
-    this.addBox(wall, w, h, t, x, h / 2, z + d / 2, { density: 0.35 });
-    this.addBox(wall, t, h, d, x - w / 2, h / 2, z, { density: 0.35 });
-    this.addBox(wall, t, h, d, x + w / 2, h / 2, z, { density: 0.35 });
+  _clutter() {
+    const r = this.rand;
 
-    // A flat walkable deck at eave height, with the gable modelled on top so
-    // the roof looks pitched but still plays as a usable surface.
-    this.addBox('roof', w + 0.6, 0.3, d + 0.6, x, h + 0.15, z, { density: 0.45 });
-    const slopes = 5;
-    for (let i = 0; i < slopes; i++) {
-      const t2 = (i + 0.5) / slopes;
-      const y = h + 0.3 + ridge * (1 - Math.abs(0.5 - t2) * 2) * 0.5;
-      const width = d * (1 - t2 * 0.0);
-      void width;
-      this.addBox('roof', w + 0.4, 0.22, d / slopes,
-        x, y, z - d / 2 + (d / slopes) * (i + 0.5), { density: 0.5, walkable: true });
+    // Drums and pallets against the buildings, as in the reference yard.
+    const drumSpots = [
+      [-40, -48], [-26, -46], [46, -22], [66, -50], [-30, 12], [18, 44],
+      [70, 12], [-70, -18], [8, 66],
+    ];
+    for (const [x, z] of drumSpots) {
+      drumCluster(this.batcher, { x, z, count: 6, mat: r() < 0.25 ? 'drumBlue' : 'drum' });
+      this.collide(x, 0.6, z, 2.3, 1.2, 1.7, 0, true);
     }
-    // roll-up door
-    this.addBox('plate', 4.4, 4.0, 0.16, x, 2.0, z - d / 2 - 0.22,
-      { solid: false, density: 1.0 });
-    // eave lip so the roof reads as an object from the ground
-    this.addBox('plate', w + 1.2, 0.16, 0.5, x, h + 0.05, z - d / 2 - 0.5,
-      { solid: false, density: 1.2 });
+
+    const palletSpots = [
+      [-46, -44], [-20, -40], [42, -26], [70, -44], [-24, 16], [24, 40],
+      [64, 18], [-66, -24], [14, 70], [-12, -22], [36, 8],
+    ];
+    for (const [x, z] of palletSpots) {
+      palletStack(this.batcher, { x, z, high: 2 + Math.floor(r() * 3), ry: r() * Math.PI });
+      this.collide(x, 0.25, z, 1.3, 0.5, 1.1, 0, true);
+    }
+
+    // Loose crates for low cover.
+    for (let i = 0; i < 46; i++) {
+      const x = (r() - 0.5) * (MAP_SIZE - 40);
+      const z = (r() - 0.5) * (MAP_SIZE - 40);
+      if (Math.hypot(x, z) < 12) continue;
+      const s = 0.85 + r() * 0.55;
+      this.box('wood', s, s, s, x, s / 2, z, { ry: r() * Math.PI, density: 1.3 });
+    }
+
+    // Ammo crates: stand next to one to refill.
+    const ammoSpots = [
+      [-52, -22], [50, -20], [-46, 22], [52, 22],
+      [0, -28], [0, 28], [-28, 0], [28, 0], [0, 7],
+    ];
+    for (const [x, z] of ammoSpots) {
+      this.box('containerGreen', 1.5, 0.85, 0.95, x, 0.42, z, { density: 1.0 });
+      this.box('containerGreen', 1.25, 0.14, 0.8, x, 0.92, z,
+        { solid: false, density: 1.2 });
+      this.ammoBoxes.push({ x, y: 0.85, z, radius: 2.3 });
+    }
   }
 
   _spawnPoints() {
-    // Team 0 holds the north (chowk + warehouses); team 1 the south.
     const north = [
-      [-64, -76], [-52, -80], [-40, -74], [-70, -62],
-      [46, -78], [58, -74], [66, -64], [40, -70],
+      [-76, -74], [-60, -78], [-42, -74], [-80, -56],
+      [40, -76], [56, -78], [70, -66], [24, -70],
     ];
     const south = [
-      [-64, 76], [-52, 80], [-40, 74], [-70, 62],
-      [46, 78], [58, 74], [66, 64], [40, 70],
+      [-76, 74], [-60, 78], [-42, 74], [-80, 56],
+      [40, 76], [56, 78], [70, 66], [24, 70],
     ];
-    for (const [x, z] of north) this.spawns[0].push(new THREE.Vector3(x, 1.2, z));
-    for (const [x, z] of south) this.spawns[1].push(new THREE.Vector3(x, 1.2, z));
+    for (const [x, z] of north) this.spawns[0].push(new THREE.Vector3(x, 0.6, z));
+    for (const [x, z] of south) this.spawns[1].push(new THREE.Vector3(x, 0.6, z));
   }
 
   /** Picks a spawn far from the given threats. */
@@ -640,9 +675,7 @@ export class ArenaMap {
     let best = list[0], bestScore = -Infinity;
     for (const p of list) {
       let score = Math.random() * 6;
-      for (const t of threats) {
-        score += Math.min(p.distanceTo(t), 60);
-      }
+      for (const t of threats) score += Math.min(p.distanceTo(t), 60);
       if (score > bestScore) { bestScore = score; best = p; }
     }
     return best.clone().add(new THREE.Vector3(
@@ -650,43 +683,29 @@ export class ArenaMap {
   }
 }
 
-/** Local copy of the deterministic RNG so prop scatter is stable per build. */
-function mulberry(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Sky dome + directional sun tuned to the cold overcast of the references. */
+/** Sky dome and lighting, tuned to the cold overcast of the references. */
 export function buildSky(scene, quality) {
   const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(600, 24, 16),
+    new THREE.SphereGeometry(620, 24, 16),
     new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide, fog: false }),
   );
   sky.name = 'sky';
   scene.add(sky);
 
-  scene.fog = new THREE.Fog(0xa8bcc9, 60, quality.fog);
+  scene.fog = new THREE.Fog(0xa9c0d0, 70, quality.fog);
 
-  const hemi = new THREE.HemisphereLight(0xbcd2e2, 0x5c5a52, 1.35);
+  const hemi = new THREE.HemisphereLight(0xbcd4e6, 0x5b584f, 1.25);
   scene.add(hemi);
+  scene.add(new THREE.AmbientLight(0x9fb2c4, 0.34));
 
-  // Shadowed soldiers were reading as black cut-outs against the yard; a low
-  // ambient term keeps them legible without flattening the sunlight.
-  scene.add(new THREE.AmbientLight(0x9fb2c4, 0.42));
-
-  const sun = new THREE.DirectionalLight(0xfff0d8, 2.0);
+  const sun = new THREE.DirectionalLight(0xfff2dc, 2.1);
   sun.position.set(72, 120, 46);
   if (quality.shadowMap > 0) {
     sun.castShadow = true;
     sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap);
     sun.shadow.camera.near = 10;
-    sun.shadow.camera.far = 320;
-    const s = 90;
+    sun.shadow.camera.far = 340;
+    const s = 95;
     sun.shadow.camera.left = -s;
     sun.shadow.camera.right = s;
     sun.shadow.camera.top = s;
@@ -697,7 +716,7 @@ export function buildSky(scene, quality) {
   scene.add(sun);
   scene.add(sun.target);
 
-  const bounce = new THREE.DirectionalLight(0x93a8bb, 0.35);
+  const bounce = new THREE.DirectionalLight(0x93a8bb, 0.3);
   bounce.position.set(-60, 40, -70);
   scene.add(bounce);
 

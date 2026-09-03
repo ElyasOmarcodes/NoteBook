@@ -30,4 +30,5 @@ flutter:
     - assets/web/js/world/
     - assets/web/js/entities/
     - assets/web/js/systems/
+    - assets/web/models/
     - assets/models/

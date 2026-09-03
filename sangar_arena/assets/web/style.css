@@ -183,6 +183,7 @@ html, body {
 /* ---------------- sticks ---------------- */
 .stick {
   position: absolute; bottom: calc(20px * var(--hud)); left: calc(18px * var(--hud));
+  z-index: 2;
   width: calc(120px * var(--hud)); height: calc(120px * var(--hud));
   border-radius: 50%;
   border: 1.5px solid rgba(255,255,255,.22);
@@ -197,10 +198,16 @@ html, body {
   background: rgba(240,244,250,.82);
   box-shadow: 0 2px 8px rgba(0,0,0,.5);
 }
+/* The look pad is a free area, not a stick. It has to cover the whole right
+   side including the space above the buttons — when it only reached 62% up
+   from the bottom, the action cluster sat on top of nearly all of it and
+   dragging to turn did nothing. Buttons are later siblings, so their touches
+   still win where they overlap. */
 .stick-look {
-  left: auto; right: 0; bottom: 0;
-  width: 55%; height: 62%;
+  left: auto; right: 0; top: 0; bottom: 0;
+  width: 62%; height: 100%;
   border: none; background: transparent; border-radius: 0;
+  z-index: 1;
 }
 .stick-look .stick-knob { display: none; }
 
@@ -212,6 +219,7 @@ body.left-handed .hud-bottom-left { left: auto; right: 12px; align-items: flex-e
 /* ---------------- buttons ---------------- */
 .action-cluster {
   position: absolute; right: calc(12px * var(--hud)); bottom: calc(14px * var(--hud));
+  z-index: 3;
   display: grid;
   grid-template-columns: repeat(3, auto);
   gap: calc(9px * var(--hud));

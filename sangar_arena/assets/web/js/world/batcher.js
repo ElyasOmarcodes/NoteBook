@@ -29,13 +29,23 @@ export class Batcher {
       bucket = { geoms: [], opts, matName };
       this.buckets.set(key, bucket);
     }
-    const g = geometry.clone();
+    // Merging demands identical attribute sets across the whole bucket. Boxes
+    // and cylinders arrive indexed while ExtrudeGeometry does not, so drop the
+    // index everywhere rather than trying to reconcile the two.
+    let g = geometry.index ? geometry.toNonIndexed() : geometry.clone();
     g.applyMatrix4(matrix);
-    // Merging requires identical attribute sets.
-    if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(
-      new Float32Array((g.attributes.position.count) * 2), 2));
-    g.deleteAttribute('uv1');
-    g.deleteAttribute('uv2');
+    if (!g.attributes.uv) {
+      g.setAttribute('uv', new THREE.BufferAttribute(
+        new Float32Array(g.attributes.position.count * 2), 2));
+    }
+    if (!g.attributes.normal) g.computeVertexNormals();
+    // Keep only the three attributes the merge needs, in every bucket.
+    for (const name of Object.keys(g.attributes)) {
+      if (name !== 'position' && name !== 'normal' && name !== 'uv') {
+        g.deleteAttribute(name);
+      }
+    }
+    g.morphAttributes = {};
     bucket.geoms.push(g);
   }
 
