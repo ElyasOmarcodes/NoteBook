@@ -67,6 +67,7 @@ export class ArenaMap {
     this._containerYard();
     this._chowk();
     this._downtown();
+    this._frontage();
 
     this._connectors();
     this._clutter();
@@ -368,6 +369,10 @@ export class ArenaMap {
     }
 
     const inset = HALF - 1.4;
+    // One board per district and no more: each name appears exactly once, on
+    // the side of the compound it belongs to. They used to be doubled up,
+    // once here and once inside the district, so the same name faced you from
+    // two directions and told you nothing.
     this.addSign(0, 4.3, -inset, 0, DISTRICTS[0].ps, DISTRICTS[0].en,
       DISTRICTS[0].color, { width: 9.5, height: 4.4, posts: false });
     this.addSign(0, 4.3, inset, Math.PI, DISTRICTS[3].ps, DISTRICTS[3].en,
@@ -489,6 +494,133 @@ export class ArenaMap {
     this.addStairs(x + w / 2 + 0.4, 0, z, -Math.PI / 2, 5, { width: 1.2, rise: 0.3, run: 0.34 });
   }
 
+
+  /**
+   * A room: four walls under a pitched iron roof, in the storeys the plan
+   * gives it.
+   *
+   * `door` cuts a real opening in one wall — the wall is built as two pieces
+   * with a gap — so a player can walk in and fight from inside rather than
+   * only around the outside.
+   */
+  room({ x, z, w, d, storeys = 1, mat = 'sidingWhite', roof = 'roofRed',
+    door = 'south', windows = true, ladder = false }) {
+    const FLOOR = 3.5;
+    const h = FLOOR * storeys;
+    const t = 0.42;
+
+    // Walls, with a doorway cut into whichever face the plan opens.
+    const wallRun = (side) => {
+      const along = side === 'north' || side === 'south' ? w : d;
+      const gap = door === side ? 2.6 : 0;
+      const seg = (along - gap) / 2;
+      const pieces = gap > 0
+        ? [[-(gap / 2 + seg / 2), seg], [gap / 2 + seg / 2, seg]]
+        : [[0, along]];
+      // Above a doorway the wall carries on, so the opening is a door and not
+      // a slot to the roof.
+      const lintel = gap > 0 ? [[0, gap]] : [];
+      for (const [off, len] of pieces) {
+        if (side === 'north') this.box(mat, len, h, t, x + off, h / 2, z - d / 2, { density: 0.2 });
+        else if (side === 'south') this.box(mat, len, h, t, x + off, h / 2, z + d / 2, { density: 0.2 });
+        else if (side === 'west') this.box(mat, t, h, len, x - w / 2, h / 2, z + off, { density: 0.2 });
+        else this.box(mat, t, h, len, x + w / 2, h / 2, z + off, { density: 0.2 });
+      }
+      for (const [off, len] of lintel) {
+        const above = h - 2.3;
+        if (above <= 0.1) continue;
+        if (side === 'north') this.box(mat, len, above, t, x + off, 2.3 + above / 2, z - d / 2, { density: 0.2 });
+        else if (side === 'south') this.box(mat, len, above, t, x + off, 2.3 + above / 2, z + d / 2, { density: 0.2 });
+        else if (side === 'west') this.box(mat, t, above, len, x - w / 2, 2.3 + above / 2, z + off, { density: 0.2 });
+        else this.box(mat, t, above, len, x + w / 2, 2.3 + above / 2, z + off, { density: 0.2 });
+      }
+    };
+    for (const side of ['north', 'south', 'west', 'east']) wallRun(side);
+
+    // Intermediate floors, so a two- or three-storey room has rooms in it.
+    for (let f = 1; f < storeys; f++) {
+      this.box('plate', w - 0.8, 0.3, d - 0.8, x, f * FLOOR, z, { density: 0.5 });
+    }
+
+    // Deck at eave height, then the pitched roof on top of it.
+    this.box('roof', w + 0.9, 0.28, d + 0.9, x, h + 0.14, z,
+      { density: 0.3, walkable: true });
+    gableRoof(this.batcher, { x, y: h + 0.28, z, w, d, rise: 2.4, mat: roof });
+    for (const side of [-1, 1]) {
+      this.box('plate', w + 1.2, 0.22, 0.28, x, h + 0.04, z + side * (d / 2 + 0.55),
+        { solid: false, density: 1.0 });
+    }
+
+    if (windows) {
+      for (let f = 0; f < storeys; f++) {
+        const y = f * FLOOR + 2.3;
+        this.addWindows(x, y, z - d / 2 - 0.24, w - 6, 1.1, 0);
+        this.addWindows(x, y, z + d / 2 + 0.24, w - 6, 1.1, Math.PI);
+      }
+    }
+    if (ladder) {
+      this.addLadder(x + w / 2 + 0.5, z, 0, h + 0.5, -Math.PI / 2, { wood: false });
+    }
+    return { x, z, w, d, h, top: h + 0.28 };
+  }
+
+  /**
+   * An apartment: the same shell with a flat roof and a parapet, which is what
+   * makes its top a fighting position rather than a slope.
+   */
+  apartment({ x, z, w, d, storeys = 2, mat = 'sidingWhite', ladder = false,
+    door = 'south' }) {
+    const FLOOR = 3.5;
+    const h = FLOOR * storeys;
+    const t = 0.42;
+    const wallRun = (side) => {
+      const along = side === 'north' || side === 'south' ? w : d;
+      const gap = door === side ? 2.6 : 0;
+      const seg = (along - gap) / 2;
+      const pieces = gap > 0
+        ? [[-(gap / 2 + seg / 2), seg], [gap / 2 + seg / 2, seg]]
+        : [[0, along]];
+      for (const [off, len] of pieces) {
+        if (side === 'north') this.box(mat, len, h, t, x + off, h / 2, z - d / 2, { density: 0.2 });
+        else if (side === 'south') this.box(mat, len, h, t, x + off, h / 2, z + d / 2, { density: 0.2 });
+        else if (side === 'west') this.box(mat, t, h, len, x - w / 2, h / 2, z + off, { density: 0.2 });
+        else this.box(mat, t, h, len, x + w / 2, h / 2, z + off, { density: 0.2 });
+      }
+      if (gap > 0) {
+        const above = h - 2.3;
+        if (side === 'north') this.box(mat, gap, above, t, x, 2.3 + above / 2, z - d / 2, { density: 0.2 });
+        else if (side === 'south') this.box(mat, gap, above, t, x, 2.3 + above / 2, z + d / 2, { density: 0.2 });
+        else if (side === 'west') this.box(mat, t, above, gap, x - w / 2, 2.3 + above / 2, z, { density: 0.2 });
+        else this.box(mat, t, above, gap, x + w / 2, 2.3 + above / 2, z, { density: 0.2 });
+      }
+    };
+    for (const side of ['north', 'south', 'west', 'east']) wallRun(side);
+
+    for (let f = 1; f < storeys; f++) {
+      this.box('plate', w - 0.8, 0.3, d - 0.8, x, f * FLOOR, z, { density: 0.5 });
+    }
+
+    // Flat roof and its parapet.
+    this.box('concrete', w + 0.6, 0.34, d + 0.6, x, h + 0.17, z,
+      { density: 0.34, walkable: true });
+    for (const [dx, dz, pw, pd] of [
+      [0, -d / 2 - 0.15, w + 0.6, 0.3], [0, d / 2 + 0.15, w + 0.6, 0.3],
+      [-w / 2 - 0.15, 0, 0.3, d + 0.6], [w / 2 + 0.15, 0, 0.3, d + 0.6],
+    ]) {
+      this.box('concrete', pw, 0.9, pd, x + dx, h + 0.79, z + dz, { density: 0.8 });
+    }
+
+    for (let f = 0; f < storeys; f++) {
+      const y = f * FLOOR + 2.3;
+      this.addWindows(x, y, z - d / 2 - 0.24, w - 6, 1.2, 0);
+      this.addWindows(x, y, z + d / 2 + 0.24, w - 6, 1.2, Math.PI);
+    }
+    if (ladder) {
+      this.addLadder(x + w / 2 + 0.5, z, 0, h + 0.9, -Math.PI / 2, { wood: false });
+    }
+    return { x, z, w, d, h, top: h + 0.34 };
+  }
+
   // =======================================================================
   // districts
   // =======================================================================
@@ -504,7 +636,6 @@ export class ArenaMap {
     this.cylinder(-3, -74, 1.0, 0, 24);
 
     this.officeHut({ x: -36, z: -34 });
-    this.addSign(-46, 3.1, -18, 0, DISTRICTS[0].ps, DISTRICTS[0].en, DISTRICTS[0].color);
     this.places.push({ x: -52, z: -50, ps: DISTRICTS[0].ps, en: DISTRICTS[0].en });
   }
 
@@ -518,9 +649,7 @@ export class ArenaMap {
     this.addStairs(30, 0, -70, 0, 22, { width: 2.2 });
     this.box('wood', 3.2, 0.16, 3.2, 30, 7.5, -61.5, { density: 0.9 });
 
-    this.plantBlock({ x: 80, z: -30, w: 18, d: 22, h: 8.2, skylights: 2, ladderSide: -1, wall: 'block' });
 
-    this.addSign(40, 3.1, -14, 0, DISTRICTS[1].ps, DISTRICTS[1].en, DISTRICTS[1].color);
     this.places.push({ x: 54, z: -48, ps: DISTRICTS[1].ps, en: DISTRICTS[1].en });
   }
 
@@ -557,7 +686,6 @@ export class ArenaMap {
     this.collide((tanks[0].x + tanks[2].x) / 2, 13.1, (tanks[0].z + tanks[2].z) / 2,
       1.4, 0.4, Math.abs(tanks[2].z - tanks[0].z) + 2, 0, true);
 
-    this.addSign(-40, 3.1, 12, Math.PI, DISTRICTS[2].ps, DISTRICTS[2].en, DISTRICTS[2].color);
     this.places.push({ x: -52, z: 44, ps: DISTRICTS[2].ps, en: DISTRICTS[2].en });
   }
 
@@ -587,7 +715,6 @@ export class ArenaMap {
     this.addLadder(62, 46.5, 0, 8.0, Math.PI, { wood: false });
     this.addCatwalk(62, 44, 58, 34, 7.95, { width: 0.95 });
 
-    this.addSign(30, 3.1, 14, Math.PI, DISTRICTS[3].ps, DISTRICTS[3].en, DISTRICTS[3].color);
     this.places.push({ x: 52, z: 46, ps: DISTRICTS[3].ps, en: DISTRICTS[3].en });
   }
 
@@ -770,8 +897,108 @@ export class ArenaMap {
     this.addCatwalk(-12, 48.5, -12, 65.5, DECK + 4.5, { width: 1.0 });
     this.addCatwalk(-4.6, 46, 8.4, 46, DECK + 4.5, { width: 1.0 });
 
-    this.addSign(2, 3.1, 30, Math.PI, 'ښار', 'DOWNTOWN', DISTRICTS[2].color);
     this.places.push({ x: 2, z: 60, ps: 'ښار', en: 'DOWNTOWN' });
+  }
+
+
+  /**
+   * The frontage: three apartments and three rooms on every side of the
+   * compound, with link walls closing the gaps between them.
+   *
+   * The plan calls for no empty edge. Each side gets the same six buildings in
+   * a different order and at different heights, so a player crossing the map
+   * always has a wall to break line of sight and a roof worth climbing to, and
+   * no two corners look alike.
+   *
+   * Colour follows the plan: red is painted iron, plain is white iron, and the
+   * grille sections are expanded metal you can shoot through the gaps of.
+   */
+  _frontage() {
+    const SLOTS = [-70, -42, -14, 14, 42, 70];
+    // Alternating room / apartment, cycling storeys and colours so that the
+    // same six never repeat in the same order on two sides.
+    const PLAN = [
+      { kind: 'apt',  storeys: 2, mat: 'sidingWhite' },
+      { kind: 'room', storeys: 1, mat: 'sidingRed',   roof: 'roofRed' },
+      { kind: 'apt',  storeys: 3, mat: 'sidingGrey' },
+      { kind: 'room', storeys: 2, mat: 'sidingWhite', roof: 'roof' },
+      { kind: 'apt',  storeys: 1, mat: 'mesh' },
+      { kind: 'room', storeys: 3, mat: 'sidingRed',   roof: 'roofRed' },
+    ];
+    const SIDES = [
+      // side, fixed coordinate, which way the doors face, plan rotation
+      { id: 'north', axis: 'x', at: -86, door: 'south', spin: 0, d: 15 },
+      { id: 'east',  axis: 'z', at: 90,  door: 'west',  spin: 2, d: 14 },
+      { id: 'south', axis: 'x', at: 94,  door: 'north', spin: 4, d: 9 },
+      { id: 'west',  axis: 'z', at: -88, door: 'east',  spin: 1, d: 15 },
+    ];
+
+    for (const side of SIDES) {
+      const built = [];
+      for (let i = 0; i < SLOTS.length; i++) {
+        const spec = PLAN[(i + side.spin) % PLAN.length];
+        const along = SLOTS[i];
+        const horizontal = side.axis === 'x';
+        const x = horizontal ? along : side.at;
+        const z = horizontal ? side.at : along;
+        const w = horizontal ? 22 : side.d;
+        const d = horizontal ? side.d : 22;
+        // A half-depth building, the plan's 0.5x: full height, half the plan.
+        const half = (i === 4);
+        const opts = {
+          x, z,
+          w: half && horizontal ? w * 0.5 : w,
+          d: half && !horizontal ? d * 0.5 : d,
+          storeys: spec.storeys,
+          mat: spec.mat,
+          door: side.door,
+          ladder: i % 3 === 1,
+        };
+        const b = spec.kind === 'room'
+          ? this.room({ ...opts, roof: spec.roof })
+          : this.apartment(opts);
+        built.push({ ...b, along, horizontal });
+      }
+
+      // Link walls: where there is no building the plan says there is a wall.
+      for (let i = 0; i < built.length - 1; i++) {
+        const a = built[i], c = built[i + 1];
+        const gapMid = (a.along + c.along) / 2;
+        const span = (c.along - a.along)
+          - (a.horizontal ? a.w + c.w : a.d + c.d) / 2 - 1.2;
+        if (span < 1.5) continue;
+        if (a.horizontal) {
+          this.box('wall', span, 3.4, 0.5, gapMid, 1.7, side.at, { density: 0.3 });
+          this.box('kerb', span + 0.4, 0.3, 0.8, gapMid, 3.55, side.at, { density: 0.9 });
+        } else {
+          this.box('wall', 0.5, 3.4, span, side.at, 1.7, gapMid, { density: 0.3 });
+          this.box('kerb', 0.8, 0.3, span + 0.4, side.at, 3.55, gapMid, { density: 0.9 });
+        }
+      }
+    }
+
+    // Ways up that are not stairs: a container against a wall, a stack that
+    // reaches a low roof, a tank you can climb from a catwalk. The plan asks
+    // for the climb to be found rather than signposted.
+    this._climbRoute(-70, -70, 0);
+    this._climbRoute(70, 76, Math.PI / 2);
+    this._climbRoute(-72, 74, 0);
+  }
+
+  /**
+   * An indirect way onto a roof: two containers stacked against a low wall,
+   * then a crate on top to bridge the last step.
+   */
+  _climbRoute(x, z, ry) {
+    const cos = Math.abs(Math.cos(ry)), sin = Math.abs(Math.sin(ry));
+    for (let i = 0; i < 2; i++) {
+      container(this.batcher, { x, y: i * 2.62, z, ry, mat: i ? 'containerRust' : 'containerBlue' });
+      this.collide(x, i * 2.62 + 1.3, z,
+        12.2 * cos + 2.44 * sin, 2.59, 12.2 * sin + 2.44 * cos, 0, true);
+    }
+    // The last step: a crate on the stack, level with a single-storey eave.
+    const ox = Math.sin(ry) * 4.2, oz = Math.cos(ry) * 4.2;
+    this.box('wood', 1.4, 1.1, 1.4, x + ox, 5.24 + 0.55, z + oz, { density: 1.2 });
   }
 
   _connectors() {
