@@ -146,23 +146,24 @@ function paintAsphalt(size, seed) {
   const polish = new Float32Array(size * size);
 
   paint(ctx, size, (x, y, i) => {
-    // Bitumen: dark and close-textured. The old painter pushed hard aggregate
-    // through it, which read as gravel rather than as a road.
-    let v = 44 + (grain[i] - 0.5) * 16 + (fine[i] - 0.5) * 10;
+    // Bitumen: dark and close-textured, but not black. Weathered asphalt in
+    // daylight sits around a quarter grey, and at 44 under ACES tone mapping
+    // the whole road crushed to a flat black band.
+    let v = 62 + (grain[i] - 0.5) * 16 + (fine[i] - 0.5) * 10;
     // A little aggregate showing where the binder has worn thin. Kept low
     // and kept grey: pushed hard, or left bright, it reads as gravel — or as
     // snow — rather than as a road.
     v += Math.pow(1 - stones[i], 8) * 13;
     // Patches are a greyer, flatter mix laid over the original.
     const isPatch = smoothstep(0.54, 0.66, patch[i]);
-    v = lerp(v, 58 + (fine[i] - 0.5) * 8, isPatch);
+    v = lerp(v, 76 + (fine[i] - 0.5) * 8, isPatch);
     // Wheel polish. It used to be two sine bands across the tile, which meant
     // every copy of the tile laid the same two stripes down the road; it has
     // to come from the same wandering field as everything else.
     const worn = smoothstep(0.48, 0.74, wear[i]);
     polish[i] = worn * (1 - isPatch * 0.6);
     v -= worn * 6;
-    v += (macro[i] - 0.5) * 9;
+    v += (macro[i] - 0.5) * 7;
     const warm = 1 + (grain[i] - 0.5) * 0.05;
     return [v * warm, v * 0.985, v * 0.96];
   });
@@ -199,11 +200,23 @@ function paintConcrete(size, seed, { panelRows = 2, tint = 1 } = {}) {
   const macro = fbm(size, seed + 63, { octaves: 2, cells: 1 });
   // Aggregate showing through where the laitance has worn off the face.
   const pits = cellular(size, seed + 43, Math.round(size / 18));
+  // Precast panels are cast in separate pours, days apart, and no two come
+  // out the same shade. A wall of identical panels is the giveaway that they
+  // came from one painter rather than from a yard.
+  const panelRand = rng(seed + 71);
+  const jointX = [], panelTone = [];
+  for (let r = 0; r < panelRows; r++) {
+    jointX.push((0.35 + panelRand() * 0.30) * size);
+    panelTone.push([(panelRand() - 0.5) * 22, (panelRand() - 0.5) * 22]);
+  }
+  const rowHeight = size / panelRows;
 
   paint(ctx, size, (x, y, i) => {
     let v = 168 + (grain[i] - 0.5) * 28 + (fine[i] - 0.5) * 14;
     v += (macro[i] - 0.5) * 16;
     v += Math.pow(1 - pits[i], 9) * 28;
+    const row = Math.min(panelRows - 1, Math.floor(y / rowHeight));
+    v += panelTone[row][x < jointX[row] ? 0 : 1];
     // Damp patches: concrete darkens unevenly where it holds water, but only
     // gently — heavy blotching reads as camouflage, not as a wall.
     v -= smoothstep(0.60, 0.86, blotch[i]) * 20;
@@ -221,12 +234,13 @@ function paintConcrete(size, seed, { panelRows = 2, tint = 1 } = {}) {
     ctx.fillStyle = 'rgba(224,222,214,0.55)';
     ctx.fillRect(0, y, size, 3);
   }
-  // Vertical joints, offset per row like real panel runs.
+  // Vertical joints, at the same places the tone changes: a panel edge and a
+  // change of shade are the same event on a real wall.
   for (let r = 0; r < panelRows; r++) {
-    const rand = rng(seed + 100 + r);
-    const x = (0.35 + rand() * 0.3) * size;
     ctx.fillStyle = 'rgba(72,72,70,0.6)';
-    ctx.fillRect(x, r * rowH, 3, rowH);
+    ctx.fillRect(jointX[r] - 1.5, r * rowH, 3, rowH);
+    ctx.fillStyle = 'rgba(226,224,216,0.28)';
+    ctx.fillRect(jointX[r] + 1.5, r * rowH, 1.5, rowH);
   }
   ctx.restore();
 
@@ -292,7 +306,8 @@ function paintCorrugated(size, seed, {
   // Where the paint has come off. It has to be flake-sized and hard-edged:
   // at three cells with a wide ramp these were metre-wide soft clouds, which
   // put what looked like camouflage on every red wall in the yard.
-  const peel = warp(size, fbm(size, seed + 21, { octaves: 4, cells: 11 }),
+  const peel = warp(size,
+    fbm(size, seed + 21, { octaves: 4, cells: 12, aspect: 3 }),
     fbm(size, seed + 23, { octaves: 3, cells: 20 }), size * 0.03);
   const period = size / ribs;
 
@@ -632,7 +647,7 @@ function paintContainer(size, seed, base = [46, 88, 128]) {
   });
 
   blotches(ctx, size, seed + 5, {
-    count: 26, radius: size * 0.05, alpha: 0.45,
+    count: 26, radius: size * 0.05, alpha: 0.34,
     colours: ['128,64,28', '92,46,22', '188,186,182', '40,40,42'],
   });
   rainStreaks(ctx, size, seed + 9, {
@@ -745,7 +760,8 @@ function paintDrum(size, seed, base = [176, 150, 62]) {
   const c = makeCanvas(size);
   const ctx = ctx2d(c);
   const grain = fbm(size, seed, { octaves: 5, cells: 8 });
-  const rustField = warp(size, fbm(size, seed + 4, { octaves: 4, cells: 4 }),
+  const rustField = warp(size,
+    fbm(size, seed + 4, { octaves: 4, cells: 6, aspect: 2.5 }),
     fbm(size, seed + 6, { octaves: 3, cells: 8 }), size * 0.08);
 
   paint(ctx, size, (x, y, i) => {
@@ -792,20 +808,22 @@ function paintYard(size, seed) {
     let v = 98 + grain[i] * 38;
     // Exposed aggregate. At the fourth power over 46 this dusted the whole
     // slab with bright flecks that tiled visibly across the yard.
-    v += Math.pow(1 - grit[i], 7) * 24;
+    v += Math.pow(1 - grit[i], 7) * 17;
     // Asphalt repairs are markedly darker than the slab around them.
     v = lerp(v, 46 + grain[i] * 18, smoothstep(0.54, 0.64, patch[i]));
     v += (macro[i] - 0.5) * 14;
     return [v * 1.0, v * 0.995, v * 0.975];
   });
 
-  // Slab expansion joints on a 4-square grid.
+  // Slab expansion joints. Eight to the tile, so a slab stays about 1.4 m
+  // whatever size the tile is painted at.
   ctx.save();
-  for (let i = 1; i < 4; i++) {
-    const p = (size / 4) * i;
+  const bays = 8, jw = Math.max(2, size / 256);
+  for (let i = 1; i < bays; i++) {
+    const p = (size / bays) * i;
     ctx.fillStyle = 'rgba(46,46,46,0.72)';
-    ctx.fillRect(p - 2, 0, 3, size);
-    ctx.fillRect(0, p - 2, size, 3);
+    ctx.fillRect(p - jw, 0, jw * 1.5, size);
+    ctx.fillRect(0, p - jw, size, jw * 1.5);
   }
   ctx.restore();
 
@@ -927,7 +945,8 @@ function paintMesh(size, seed) {
   const c = makeCanvas(size);
   const ctx = ctx2d(c);
   const grain = fbm(size, seed + 3, { octaves: 4, cells: 16 });
-  const rustField = warp(size, fbm(size, seed + 11, { octaves: 3, cells: 3 }),
+  const rustField = warp(size,
+    fbm(size, seed + 11, { octaves: 3, cells: 4, aspect: 2.5 }),
     fbm(size, seed + 13, { octaves: 3, cells: 7 }), size * 0.06);
 
   ctx.clearRect(0, 0, size, size);

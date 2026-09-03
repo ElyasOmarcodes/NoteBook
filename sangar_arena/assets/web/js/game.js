@@ -94,7 +94,7 @@ export class Game {
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
 
-    const lights = buildSky(this.scene, this.quality);
+    const lights = buildSky(this.scene, this.quality, this.renderer);
     this.sun = lights.sun;
 
     // The weapon in the player's own hands is drawn in a second pass through a
@@ -107,7 +107,12 @@ export class Game {
       50, window.innerWidth / window.innerHeight, 0.02, 12);
     this.viewCamera.rotation.order = 'YXZ';
     this.viewScene.add(this.viewCamera);
-    this.viewScene.add(new THREE.HemisphereLight(0x9fb6d6, 0x4a4033, 1.15));
+    // The held weapon is mostly metal too, so it gets the same sky.
+    this.viewScene.environment = lights.environment;
+    // Lower than the world's: the weapon fills the lower third of the screen
+    // and at full strength the sky's blue sat on every metal surface of it.
+    this.viewScene.environmentIntensity = 0.45;
+    this.viewScene.add(new THREE.HemisphereLight(0x9fb6d6, 0x4a4033, 0.82));
     const viewSun = new THREE.DirectionalLight(0xfff0d8, 1.9);
     viewSun.position.set(0.6, 1.2, 0.9);
     this.viewScene.add(viewSun);

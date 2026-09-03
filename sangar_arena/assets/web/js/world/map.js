@@ -275,9 +275,14 @@ export class ArenaMap {
     const size = MAP_SIZE + 60;
     const g = new THREE.PlaneGeometry(size, size);
     g.rotateX(-Math.PI / 2);
-    scaleUV(g, size * 0.18, size * 0.18);
+    // One tile every 11 m off a 1024 painting, rather than every 5.5 m off a
+    // 512 one. Same detail per metre, but the yard is the largest single
+    // surface in the map and at the shorter period the repeat was plain to
+    // see across the open ground.
+    scaleUV(g, size * 0.09, size * 0.09);
     const mesh = new THREE.Mesh(g, material('yard', {
-      repeat: [1, 1], aniso: Math.max(8, this.quality.aniso), normalScale: 0.7,
+      size: 1024, repeat: [1, 1],
+      aniso: Math.max(8, this.quality.aniso), normalScale: 0.7,
     }));
     mesh.receiveShadow = true;
     mesh.position.y = -0.02;
@@ -962,8 +967,62 @@ export class ArenaMap {
   }
 }
 
+/**
+ * A small equirectangular sky, for the metal to have something to reflect.
+ *
+ * Half the yard is metal — corrugated siding, tank plate, container flanks,
+ * grille, walkway tread — and a metal in a physically based renderer has no
+ * diffuse response at all: everything it shows is reflected. With no
+ * environment set there was nothing to reflect, so those surfaces were lit by
+ * the direct sun alone and came out flat, dark and papery no matter what was
+ * painted on them. Point lights cannot stand in for this; only an environment
+ * can.
+ *
+ * It is deliberately tiny — 64x32, one flat sky colour above the horizon, the
+ * ground colour below it, and the sun's own disc — because a rough metal
+ * cannot resolve anything finer, and because the sky has to stay the single
+ * colour that was asked for.
+ */
+function buildEnvironment(renderer, skyColour, groundColour, sunDir) {
+  const w = 64, h = 32;
+  const data = new Float32Array(w * h * 4);
+  const skyLin = skyColour.clone().convertSRGBToLinear();
+  const grdLin = new THREE.Color(groundColour).convertSRGBToLinear();
+  const sun = sunDir.clone().normalize();
+  const dir = new THREE.Vector3();
+
+  for (let y = 0, i = 0; y < h; y++) {
+    const theta = ((y + 0.5) / h) * Math.PI;
+    for (let x = 0; x < w; x++, i += 4) {
+      const phi = ((x + 0.5) / w) * Math.PI * 2;
+      dir.set(Math.sin(theta) * Math.cos(phi), Math.cos(theta),
+        Math.sin(theta) * Math.sin(phi));
+      // A short blend across the horizon rather than a hard line, so a
+      // near-vertical wall does not show a seam where the two meet.
+      const t = Math.max(0, Math.min(1, (dir.y + 0.10) / 0.26));
+      const blend = t * t * (3 - 2 * t);
+      const d = Math.max(0, dir.dot(sun));
+      const disc = Math.pow(d, 260) * 22 + Math.pow(d, 6) * 0.45;
+      data[i] = grdLin.r + (skyLin.r - grdLin.r) * blend + disc;
+      data[i + 1] = grdLin.g + (skyLin.g - grdLin.g) * blend + disc * 0.95;
+      data[i + 2] = grdLin.b + (skyLin.b - grdLin.b) * blend + disc * 0.82;
+      data[i + 3] = 1;
+    }
+  }
+
+  const tex = new THREE.DataTexture(data, w, h, THREE.RGBAFormat,
+    THREE.FloatType);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.needsUpdate = true;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const target = pmrem.fromEquirectangular(tex);
+  tex.dispose();
+  pmrem.dispose();
+  return target.texture;
+}
+
 /** Sky dome and lighting, tuned to the cold overcast of the references. */
-export function buildSky(scene, quality) {
+export function buildSky(scene, quality, renderer) {
   // One flat colour, and it lives on the scene rather than on a sphere.
   //
   // The sky used to be a textured sphere of radius 620 centred on the origin,
@@ -977,15 +1036,24 @@ export function buildSky(scene, quality) {
   scene.background = SKY;
   scene.fog = new THREE.Fog(SKY.getHex(), 90, quality.fog);
 
-  const hemi = new THREE.HemisphereLight(0xc6dcee, 0x6a675c, 1.45);
+  const SUN_DIR = new THREE.Vector3(120, 190, 84);
+  if (renderer) {
+    scene.environment = buildEnvironment(renderer, SKY, 0x6a675c, SUN_DIR);
+    scene.environmentIntensity = 0.62;
+  }
+
+  // The hemisphere and ambient lights were standing in for the sky's indirect
+  // light. Now that the sky is genuinely there they are pulled back, or the
+  // scene is lit twice and washes out.
+  const hemi = new THREE.HemisphereLight(0xc6dcee, 0x6a675c, 0.82);
   scene.add(hemi);
-  scene.add(new THREE.AmbientLight(0xa8bccd, 0.42));
+  scene.add(new THREE.AmbientLight(0xa8bccd, 0.16));
 
   // The sun is nailed to one direction over the whole map. It used to be moved
   // to follow the player every frame, so a wall's shadow slid across the
   // ground as you walked past it and nothing lined up.
   const sun = new THREE.DirectionalLight(0xfff3e0, 2.35);
-  sun.position.set(120, 190, 84);
+  sun.position.copy(SUN_DIR);
   sun.target.position.set(0, 0, 0);
   if (quality.shadowMap > 0) {
     sun.castShadow = true;
@@ -1011,5 +1079,5 @@ export function buildSky(scene, quality) {
   scene.add(bounce);
 
   const sky = null;
-  return { sky, sun, hemi };
+  return { sky, sun, hemi, environment: scene.environment };
 }

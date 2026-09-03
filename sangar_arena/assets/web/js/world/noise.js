@@ -19,17 +19,17 @@ export function rng(seed) {
 const smooth = (t) => t * t * (3 - 2 * t);
 
 /** Tiling value noise on a `cells`x`cells` lattice. */
-export function valueNoise(size, cells, rand) {
-  const grid = new Float32Array(cells * cells);
+export function valueNoise(size, cells, rand, cellsY = cells) {
+  const grid = new Float32Array(cells * cellsY);
   for (let i = 0; i < grid.length; i++) grid[i] = rand();
   const out = new Float32Array(size * size);
-  const step = size / cells;
-  const at = (x, y) => grid[((y % cells) + cells) % cells * cells
+  const stepX = size / cells, stepY = size / cellsY;
+  const at = (x, y) => grid[((y % cellsY) + cellsY) % cellsY * cells
     + (((x % cells) + cells) % cells)];
   for (let y = 0; y < size; y++) {
-    const gy = y / step, y0 = Math.floor(gy), fy = smooth(gy - y0);
+    const gy = y / stepY, y0 = Math.floor(gy), fy = smooth(gy - y0);
     for (let x = 0; x < size; x++) {
-      const gx = x / step, x0 = Math.floor(gx), fx = smooth(gx - x0);
+      const gx = x / stepX, x0 = Math.floor(gx), fx = smooth(gx - x0);
       const a = at(x0, y0), b = at(x0 + 1, y0);
       const c = at(x0, y0 + 1), d = at(x0 + 1, y0 + 1);
       out[y * size + x] = (a + (b - a) * fx)
@@ -39,13 +39,22 @@ export function valueNoise(size, cells, rand) {
   return out;
 }
 
-/** Fractal sum of value noise. Seamless because every octave tiles. */
-export function fbm(size, seed, { octaves = 5, cells = 4, gain = 0.5 } = {}) {
+/**
+ * Fractal sum of value noise. Seamless because every octave tiles.
+ *
+ * `aspect` stretches the pattern vertically — 3 gives features three times
+ * taller than they are wide. Weathering on a vertical surface runs downhill,
+ * so round blobs read as paint spatter where streaks read as corrosion. The
+ * stretch is done by using fewer grid rows than columns rather than by
+ * resampling, which is what keeps the result tiling.
+ */
+export function fbm(size, seed,
+  { octaves = 5, cells = 4, gain = 0.5, aspect = 1 } = {}) {
   const rand = rng(seed);
   const out = new Float32Array(size * size);
   let amp = 1, total = 0, c = cells;
   for (let o = 0; o < octaves && c <= size; o++) {
-    const layer = valueNoise(size, c, rand);
+    const layer = valueNoise(size, c, rand, Math.max(1, Math.round(c / aspect)));
     for (let i = 0; i < out.length; i++) out[i] += layer[i] * amp;
     total += amp;
     amp *= gain;
