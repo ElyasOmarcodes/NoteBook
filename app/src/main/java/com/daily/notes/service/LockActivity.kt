@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -165,18 +166,10 @@ private fun LockScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(CircleShape)
-                    .padding(12.dp)
-                    .clickableNoRipple(onCancel),
+                    .clickable { onCancel() }
+                    .padding(12.dp),
                 textAlign = TextAlign.Center
             )
         }
     }
 }
-
-/** Simple clickable without importing foundation ripple wiring twice. */
-@androidx.compose.runtime.Composable
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
-    this.then(androidx.compose.foundation.clickable(
-        interactionSource = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-        indication = null
-    ) { onClick() })
