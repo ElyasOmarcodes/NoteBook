@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Notes" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/seed_background</item>
+        <item name="android:statusBarColor">@color/seed_background</item>
+        <item name="android:navigationBarColor">@color/seed_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.Notes.Lock" parent="Theme.Notes">
+        <item name="android:windowBackground">@color/lock_background</item>
+        <item name="android:statusBarColor">@color/lock_background</item>
+        <item name="android:navigationBarColor">@color/lock_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

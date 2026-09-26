@@ -1,20 +1,59 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Notes — Home Controller (parental control)
 
-# Run and deploy your AI Studio app
+A native Android (Kotlin + Jetpack Compose) parental-control app, intended for a
+parent to manage their own young child's phone. It presents itself as an ordinary
+notes app; the control panel is reachable only with a private code.
 
-This contains everything you need to run your app locally.
+> Intended use: managing a device that belongs to your own family. Set it up
+> openly with the people who use the phone.
 
-View your app in AI Studio: https://ai.studio/apps/52d3c392-d49f-4f7d-b29a-69779728caf8
+## Features
 
-## Run Locally
+- **Call allow-list** — with the filter on, only numbers you add can ring the
+  phone; all other incoming calls are rejected (Android `CallScreeningService`).
+- **App lock** — chosen apps (WhatsApp, Facebook, Instagram, TikTok, YouTube,
+  etc. by default) require the unlock code before they open. Newly installed
+  social apps are locked automatically.
+- **Disguised entry** — the launcher looks like a notes app with a generic icon.
+  Long-press the **Notes** title and enter the master code to open the hidden
+  control panel.
+- **Uninstall protection** — optional device-admin so the app can't be casually
+  removed by the child.
+- **Material 3 UI** — soft, modern Compose interface.
 
-**Prerequisites:**  Node.js
+## Default codes (change them after first launch)
 
+| Purpose | Default |
+|---|---|
+| Master code (open control panel) | `1379` |
+| App unlock code | `2468` |
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Change both from **Control Panel → Security**.
+
+## First-run setup
+
+1. Install the APK and open **Notes**.
+2. Long-press the **Notes** title → enter `1379`.
+3. In **Home**, grant: Call screening, App lock service (Accessibility),
+   Display over apps, and (optionally) Uninstall protection.
+4. Add allowed numbers under **Calls**; adjust locked apps under **Apps**.
+
+## Building
+
+APKs are built automatically by GitHub Actions
+(`.github/workflows/build-apk.yml`) on every push and attached to a GitHub
+Release. To build locally you need JDK 17 and Gradle 8.9+:
+
+```bash
+gradle assembleRelease
+# → app/build/outputs/apk/release/app-release.apk
+```
+
+The release APK is signed with the debug key so it installs via sideload without
+a private keystore. Replace the signing config for a production build.
+
+## Tech
+
+- Kotlin 2.0, Jetpack Compose (Material 3), DataStore
+- `compileSdk`/`targetSdk` 35, `minSdk` 29 — built to keep working on newer
+  Android releases.

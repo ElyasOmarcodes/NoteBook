@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Notes</string>
+    <string name="accessibility_label">Notes sync service</string>
+    <string name="accessibility_description">Keeps your notes organised across the home screen. Required for the app to run reliably in the background.</string>
+    <string name="device_admin_label">Notes protection</string>
+    <string name="device_admin_description">Prevents the notes app and its saved settings from being removed by mistake.</string>
+</resources>
